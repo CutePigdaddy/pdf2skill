@@ -1,10 +1,14 @@
-# 📘 pdf2skill
+# pdf2skill
+
+将 PDF 教材、文档和书籍自动转换为结构化知识索引与可复用技能库。
 
 [![Python Version](https://img.shields.io/badge/python-3.9+-blue.svg)](https://www.python.org/downloads/)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 [![MinerU](https://img.shields.io/badge/Engine-MinerU-orange.svg)](https://mineru.net/)
 
-**pdf2skill** 是一个自动化工具，用于将 PDF 文档（如教材、技术文档或学术书籍）转换为结构化的技能点和知识索引库，便于大语言模型（如 Claude、Cursor、Gemini）高效利用。
+**pdf2skill** 会把 PDF 解析、切片、合并并生成 `SKILL.md`，适合把教材、技术文档、学术书籍整理成适合大模型检索和复用的知识库。
+
+**GitHub 仓库简介**：PDF to skill pipeline for turning books and documents into structured knowledge chunks and reusable `SKILL.md` outputs.
 
 ## 核心功能
 
