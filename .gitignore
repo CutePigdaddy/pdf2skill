@@ -16,6 +16,7 @@ logs/
 outputs/
 scan-output/
 test_outputs/
+EY/
 
 .DS_Store
 Thumbs.db

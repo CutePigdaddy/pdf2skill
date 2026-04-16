@@ -4,6 +4,7 @@ import time
 import zipfile
 import io
 import requests
+import shutil
 from pathlib import Path
 from PyPDF2 import PdfReader, PdfWriter
 from config.config import config
@@ -123,12 +124,27 @@ class RemoteMinerUProcessor:
         resp = RetrySession.get(zip_url, timeout=120)
         output_dir.mkdir(parents=True, exist_ok=True)
         
+        zip_path = output_dir / "remote_mineru_output.zip"
+        with open(zip_path, "wb") as f_zip:
+            f_zip.write(resp.content)
+        logger.info(f"Saved raw remote zip to {zip_path}")
+        
         with zipfile.ZipFile(io.BytesIO(resp.content)) as zf:
             zf.extractall(output_dir)
             md_files = list(Path(output_dir).rglob("*.md"))
             if not md_files:
                 raise MinerUConversionError("MinerU succeeded but no Markdown file found.")
-            return md_files[-1].read_text(encoding="utf-8") # Usually auto folder has the md
+            
+            md_file = md_files[-1]
+            img_dir = md_file.parent / "images"
+            if img_dir.exists():
+                target_img_dir = output_dir.parent / "images"
+                target_img_dir.mkdir(parents=True, exist_ok=True)
+                for img in img_dir.glob("*"):
+                    if img.is_file():
+                        shutil.copy2(img, target_img_dir / img.name)
+                        
+            return md_file.read_text(encoding="utf-8") # Usually auto folder has the md
 
     def _process_single_pdf(self, pdf_path: Path, output_dir: Path) -> str:
         """Upload, wait, download and return raw markdown string."""
@@ -191,8 +207,10 @@ class LocalMinerUProcessor:
         
         with open(pdf_path, "rb") as f:
             files = {"files": (pdf_path.name, f, "application/pdf")}
+            # 确保 lang_list 符合 API 指定的数组格式
+            lang_payload = self.language if isinstance(self.language, list) else [self.language]
             data = {
-                "lang_list": self.language,
+                "lang_list": lang_payload,
                 "backend": self.backend,
                 "parse_method": self.parse_method,
                 "formula_enable": "true" if self.formula_enable else "false",
@@ -245,6 +263,12 @@ class LocalMinerUProcessor:
         resp.raise_for_status()
         
         output_dir.mkdir(parents=True, exist_ok=True)
+        
+        zip_path = output_dir / f"{pdf_path.stem}_mineru_output.zip"
+        with open(zip_path, "wb") as f_zip:
+            f_zip.write(resp.content)
+        logger.info(f"Saved raw local zip to {zip_path}")
+        
         # Note: If response_format_zip=True, the result endpoint sends ZIP binary.
         with zipfile.ZipFile(io.BytesIO(resp.content)) as zf:
             zf.extractall(output_dir)
@@ -252,7 +276,16 @@ class LocalMinerUProcessor:
             if not md_files:
                 raise MinerUConversionError("Local API succeeded but no Markdown file found in the ZIP.")
                 
-            md_text = md_files[-1].read_text(encoding="utf-8")
+            md_file = md_files[-1]
+            img_dir = md_file.parent / "images"
+            if img_dir.exists():
+                target_img_dir = output_file.parent / "images"
+                target_img_dir.mkdir(parents=True, exist_ok=True)
+                for img in img_dir.glob("*"):
+                    if img.is_file():
+                        shutil.copy2(img, target_img_dir / img.name)
+                        
+            md_text = md_file.read_text(encoding="utf-8")
             
         output_file.write_text(md_text, encoding="utf-8")
         logger.info(f"Local markdown saved to: {output_file}")

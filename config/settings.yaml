@@ -23,10 +23,11 @@ llm:
 mineru:
   # Mode: 'remote' (official API) or 'local' (school server API)
   api_mode: remote
+  # 语言配置：中文使用 'ch'，英语使用 'en'，俄语请配置为 'east_slavic'
   language: ch
   local:
     base_url: http://localhost:8001
-    backend: hybrid-auto-engine
+    backend: vlm-auto-engine
     parse_method: auto
     formula_enable: true
     table_enable: true

@@ -1,5 +1,6 @@
 import json
 import re
+import shutil
 from pathlib import Path
 from core.tree_merger import ChunkNode
 from utils.logger import logger
@@ -44,8 +45,15 @@ class SkillEngine:
         ref_dir = self.output_dir / "references"
         ref_dir.mkdir(exist_ok=True)
         
+        # 0. Copy images directory to references if it exists
+        source_img_dir = self.output_dir.parent / "images"
+        target_img_dir = ref_dir / "images"
+        if source_img_dir.exists() and not target_img_dir.exists():
+            shutil.copytree(source_img_dir, target_img_dir)
+            logger.info(f"Copied images from {source_img_dir} to {target_img_dir}")
+            
         all_nodes = self._collect_flat_nodes(root_node)
-        
+
         # 1. Book Overview Generation
         if not checkpoint.is_stage_completed("book_overview"):
             # Build Table of Contents preview for context
@@ -67,8 +75,9 @@ class SkillEngine:
                 "metadata_desc": metadata_desc
             })
         else:
-            book_overview = checkpoint.get_stage_data("book_overview").get("overview")
-            metadata_desc = checkpoint.get_stage_data("book_overview").get("metadata_desc", "")
+            stage_data = checkpoint.get_stage_data("book_overview") or {}
+            book_overview = stage_data.get("overview", "")
+            metadata_desc = stage_data.get("metadata_desc", "")
 
         summaries = checkpoint.get_stage_data("summaries") or {}
 
