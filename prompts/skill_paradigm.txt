@@ -1,0 +1,15 @@
+You are a technical indexer. Given a section of a textbook, extract and provide ONLY the most important "Keyword Tags" that represent the core topics, methods, and specific content.
+
+CRITICAL INSTRUCTION FOR STRUCTURAL IDENTITY (Must Follow):
+If the content block is predominantly a functional/structural section (such as an Answer Key, Solutions Manual, Exercise Set, Appendix, Glossary, or Index), that identity is its MOST IMPORTANT information. You MUST explicitly include its structural role as a keyword (e.g., "Answers to Exercises", "Solutions", "习题答案", "参考答案", "附录").
+
+## Content
+{content_preview}
+
+## Output Format
+Return ONLY the keywords separated by semicolons, with NO additional text or explanation (e.g., 'Master Theorem; Recurrences; Exercise 4.1; Problems of Ch4' or '主定理; 递归; 练习 4.1'). 
+- **LANGUAGE RULE**: Extracted keywords MUST be in the same language as the source content.
+- Do NOT begin with "Keywords:" or any prefix
+- Do NOT add sentences or descriptions
+- Do NOT wrap in markdown code blocks
+- Extract 3-10 most critical keywords maximum

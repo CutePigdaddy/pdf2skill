@@ -1,0 +1,478 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "FastAPI",
+    "version": "0.1.0"
+  },
+  "paths": {
+    "/file_parse": {
+      "post": {
+        "summary": "Synchronously parse uploaded files",
+        "description": "Submit a parsing task to the shared async task manager, wait for it to finish, and return the final parsing result in the same response.",
+        "operationId": "parse_pdf_file_parse_post",
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_parse_pdf_file_parse_post"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/tasks": {
+      "post": {
+        "summary": "Submit an asynchronous parse task",
+        "description": "Submit files for parsing and return immediately with a task id that can be checked via the task status and result endpoints.",
+        "operationId": "submit_parse_task_tasks_post",
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_submit_parse_task_tasks_post"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/tasks/{task_id}": {
+      "get": {
+        "summary": "Get Async Task Status",
+        "operationId": "get_async_task_status_tasks__task_id__get",
+        "parameters": [
+          {
+            "name": "task_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Task Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/tasks/{task_id}/result": {
+      "get": {
+        "summary": "Get Async Task Result",
+        "operationId": "get_async_task_result_tasks__task_id__result_get",
+        "parameters": [
+          {
+            "name": "task_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Task Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/health": {
+      "get": {
+        "summary": "Health Check",
+        "operationId": "health_check_health_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "Body_parse_pdf_file_parse_post": {
+        "properties": {
+          "files": {
+            "items": {
+              "type": "string",
+              "format": "binary"
+            },
+            "type": "array",
+            "title": "Files",
+            "description": "Upload pdf or image files for parsing"
+          },
+          "lang_list": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Lang List",
+            "description": "(Adapted only for pipeline and hybrid backend)Input the languages in the pdf to improve OCR accuracy.Options:\n- ch: Chinese, English, Chinese Traditional.\n- ch_lite: Chinese, English, Chinese Traditional, Japanese.\n- ch_server: Chinese, English, Chinese Traditional, Japanese.\n- en: English.\n- korean: Korean, English.\n- japan: Chinese, English, Chinese Traditional, Japanese.\n- chinese_cht: Chinese, English, Chinese Traditional, Japanese.\n- ta: Tamil, English.\n- te: Telugu, English.\n- ka: Kannada.\n- th: Thai, English.\n- el: Greek, English.\n- latin: French, German, Afrikaans, Italian, Spanish, Bosnian, Portuguese, Czech, Welsh, Danish, Estonian, Irish, Croatian, Uzbek, Hungarian, Serbian (Latin), Indonesian, Occitan, Icelandic, Lithuanian, Maori, Malay, Dutch, Norwegian, Polish, Slovak, Slovenian, Albanian, Swedish, Swahili, Tagalog, Turkish, Latin, Azerbaijani, Kurdish, Latvian, Maltese, Pali, Romanian, Vietnamese, Finnish, Basque, Galician, Luxembourgish, Romansh, Catalan, Quechua.\n- arabic: Arabic, Persian, Uyghur, Urdu, Pashto, Kurdish, Sindhi, Balochi, English.\n- east_slavic: Russian, Belarusian, Ukrainian, English.\n- cyrillic: Russian, Belarusian, Ukrainian, Serbian (Cyrillic), Bulgarian, Mongolian, Abkhazian, Adyghe, Kabardian, Avar, Dargin, Ingush, Chechen, Lak, Lezgin, Tabasaran, Kazakh, Kyrgyz, Tajik, Macedonian, Tatar, Chuvash, Bashkir, Malian, Moldovan, Udmurt, Komi, Ossetian, Buryat, Kalmyk, Tuvan, Sakha, Karakalpak, English.\n- devanagari: Hindi, Marathi, Nepali, Bihari, Maithili, Angika, Bhojpuri, Magahi, Santali, Newari, Konkani, Sanskrit, Haryanvi, English.\n",
+            "default": [
+              "ch"
+            ]
+          },
+          "backend": {
+            "type": "string",
+            "title": "Backend",
+            "description": "The backend for parsing:\n- pipeline: More general, supports multiple languages, hallucination-free.\n- vlm-auto-engine: High accuracy via local computing power, supports Chinese and English documents only.\n- vlm-http-client: High accuracy via remote computing power(client suitable for openai-compatible servers), supports Chinese and English documents only.\n- hybrid-auto-engine: Next-generation high accuracy solution via local computing power, supports multiple languages.\n- hybrid-http-client: High accuracy via remote computing power but requires a little local computing power(client suitable for openai-compatible servers), supports multiple languages.",
+            "default": "hybrid-auto-engine"
+          },
+          "parse_method": {
+            "type": "string",
+            "title": "Parse Method",
+            "description": "(Adapted only for pipeline and hybrid backend)The method for parsing PDF:\n- auto: Automatically determine the method based on the file type\n- txt: Use text extraction method\n- ocr: Use OCR method for image-based PDFs\n",
+            "default": "auto"
+          },
+          "formula_enable": {
+            "type": "boolean",
+            "title": "Formula Enable",
+            "description": "Enable formula parsing.",
+            "default": true
+          },
+          "table_enable": {
+            "type": "boolean",
+            "title": "Table Enable",
+            "description": "Enable table parsing.",
+            "default": true
+          },
+          "server_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Server Url",
+            "description": "(Adapted only for \u003Cvlm/hybrid\u003E-http-client backend)openai compatible server url, e.g., http://127.0.0.1:30000"
+          },
+          "return_md": {
+            "type": "boolean",
+            "title": "Return Md",
+            "description": "Return markdown content in response",
+            "default": true
+          },
+          "return_middle_json": {
+            "type": "boolean",
+            "title": "Return Middle Json",
+            "description": "Return middle JSON in response",
+            "default": false
+          },
+          "return_model_output": {
+            "type": "boolean",
+            "title": "Return Model Output",
+            "description": "Return model output JSON in response",
+            "default": false
+          },
+          "return_content_list": {
+            "type": "boolean",
+            "title": "Return Content List",
+            "description": "Return content list JSON in response",
+            "default": false
+          },
+          "return_images": {
+            "type": "boolean",
+            "title": "Return Images",
+            "description": "Return extracted images in response",
+            "default": false
+          },
+          "response_format_zip": {
+            "type": "boolean",
+            "title": "Response Format Zip",
+            "description": "Return results as a ZIP file instead of JSON",
+            "default": false
+          },
+          "return_original_file": {
+            "type": "boolean",
+            "title": "Return Original File",
+            "description": "Include the processed original input file in the ZIP result; ignored unless response_format_zip=true",
+            "default": false
+          },
+          "start_page_id": {
+            "type": "integer",
+            "title": "Start Page Id",
+            "description": "The starting page for PDF parsing, beginning from 0",
+            "default": 0
+          },
+          "end_page_id": {
+            "type": "integer",
+            "title": "End Page Id",
+            "description": "The ending page for PDF parsing, beginning from 0",
+            "default": 99999
+          }
+        },
+        "type": "object",
+        "required": [
+          "files"
+        ],
+        "title": "Body_parse_pdf_file_parse_post"
+      },
+      "Body_submit_parse_task_tasks_post": {
+        "properties": {
+          "files": {
+            "items": {
+              "type": "string",
+              "format": "binary"
+            },
+            "type": "array",
+            "title": "Files",
+            "description": "Upload pdf or image files for parsing"
+          },
+          "lang_list": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Lang List",
+            "description": "(Adapted only for pipeline and hybrid backend)Input the languages in the pdf to improve OCR accuracy.Options:\n- ch: Chinese, English, Chinese Traditional.\n- ch_lite: Chinese, English, Chinese Traditional, Japanese.\n- ch_server: Chinese, English, Chinese Traditional, Japanese.\n- en: English.\n- korean: Korean, English.\n- japan: Chinese, English, Chinese Traditional, Japanese.\n- chinese_cht: Chinese, English, Chinese Traditional, Japanese.\n- ta: Tamil, English.\n- te: Telugu, English.\n- ka: Kannada.\n- th: Thai, English.\n- el: Greek, English.\n- latin: French, German, Afrikaans, Italian, Spanish, Bosnian, Portuguese, Czech, Welsh, Danish, Estonian, Irish, Croatian, Uzbek, Hungarian, Serbian (Latin), Indonesian, Occitan, Icelandic, Lithuanian, Maori, Malay, Dutch, Norwegian, Polish, Slovak, Slovenian, Albanian, Swedish, Swahili, Tagalog, Turkish, Latin, Azerbaijani, Kurdish, Latvian, Maltese, Pali, Romanian, Vietnamese, Finnish, Basque, Galician, Luxembourgish, Romansh, Catalan, Quechua.\n- arabic: Arabic, Persian, Uyghur, Urdu, Pashto, Kurdish, Sindhi, Balochi, English.\n- east_slavic: Russian, Belarusian, Ukrainian, English.\n- cyrillic: Russian, Belarusian, Ukrainian, Serbian (Cyrillic), Bulgarian, Mongolian, Abkhazian, Adyghe, Kabardian, Avar, Dargin, Ingush, Chechen, Lak, Lezgin, Tabasaran, Kazakh, Kyrgyz, Tajik, Macedonian, Tatar, Chuvash, Bashkir, Malian, Moldovan, Udmurt, Komi, Ossetian, Buryat, Kalmyk, Tuvan, Sakha, Karakalpak, English.\n- devanagari: Hindi, Marathi, Nepali, Bihari, Maithili, Angika, Bhojpuri, Magahi, Santali, Newari, Konkani, Sanskrit, Haryanvi, English.\n",
+            "default": [
+              "ch"
+            ]
+          },
+          "backend": {
+            "type": "string",
+            "title": "Backend",
+            "description": "The backend for parsing:\n- pipeline: More general, supports multiple languages, hallucination-free.\n- vlm-auto-engine: High accuracy via local computing power, supports Chinese and English documents only.\n- vlm-http-client: High accuracy via remote computing power(client suitable for openai-compatible servers), supports Chinese and English documents only.\n- hybrid-auto-engine: Next-generation high accuracy solution via local computing power, supports multiple languages.\n- hybrid-http-client: High accuracy via remote computing power but requires a little local computing power(client suitable for openai-compatible servers), supports multiple languages.",
+            "default": "hybrid-auto-engine"
+          },
+          "parse_method": {
+            "type": "string",
+            "title": "Parse Method",
+            "description": "(Adapted only for pipeline and hybrid backend)The method for parsing PDF:\n- auto: Automatically determine the method based on the file type\n- txt: Use text extraction method\n- ocr: Use OCR method for image-based PDFs\n",
+            "default": "auto"
+          },
+          "formula_enable": {
+            "type": "boolean",
+            "title": "Formula Enable",
+            "description": "Enable formula parsing.",
+            "default": true
+          },
+          "table_enable": {
+            "type": "boolean",
+            "title": "Table Enable",
+            "description": "Enable table parsing.",
+            "default": true
+          },
+          "server_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Server Url",
+            "description": "(Adapted only for \u003Cvlm/hybrid\u003E-http-client backend)openai compatible server url, e.g., http://127.0.0.1:30000"
+          },
+          "return_md": {
+            "type": "boolean",
+            "title": "Return Md",
+            "description": "Return markdown content in response",
+            "default": true
+          },
+          "return_middle_json": {
+            "type": "boolean",
+            "title": "Return Middle Json",
+            "description": "Return middle JSON in response",
+            "default": false
+          },
+          "return_model_output": {
+            "type": "boolean",
+            "title": "Return Model Output",
+            "description": "Return model output JSON in response",
+            "default": false
+          },
+          "return_content_list": {
+            "type": "boolean",
+            "title": "Return Content List",
+            "description": "Return content list JSON in response",
+            "default": false
+          },
+          "return_images": {
+            "type": "boolean",
+            "title": "Return Images",
+            "description": "Return extracted images in response",
+            "default": false
+          },
+          "response_format_zip": {
+            "type": "boolean",
+            "title": "Response Format Zip",
+            "description": "Return results as a ZIP file instead of JSON",
+            "default": false
+          },
+          "return_original_file": {
+            "type": "boolean",
+            "title": "Return Original File",
+            "description": "Include the processed original input file in the ZIP result; ignored unless response_format_zip=true",
+            "default": false
+          },
+          "start_page_id": {
+            "type": "integer",
+            "title": "Start Page Id",
+            "description": "The starting page for PDF parsing, beginning from 0",
+            "default": 0
+          },
+          "end_page_id": {
+            "type": "integer",
+            "title": "End Page Id",
+            "description": "The ending page for PDF parsing, beginning from 0",
+            "default": 99999
+          }
+        },
+        "type": "object",
+        "required": [
+          "files"
+        ],
+        "title": "Body_submit_parse_task_tasks_post"
+      },
+      "HTTPValidationError": {
+        "properties": {
+          "detail": {
+            "items": {
+              "$ref": "#/components/schemas/ValidationError"
+            },
+            "type": "array",
+            "title": "Detail"
+          }
+        },
+        "type": "object",
+        "title": "HTTPValidationError"
+      },
+      "ValidationError": {
+        "properties": {
+          "loc": {
+            "items": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "integer"
+                }
+              ]
+            },
+            "type": "array",
+            "title": "Location"
+          },
+          "msg": {
+            "type": "string",
+            "title": "Message"
+          },
+          "type": {
+            "type": "string",
+            "title": "Error Type"
+          },
+          "input": {
+            "title": "Input"
+          },
+          "ctx": {
+            "type": "object",
+            "title": "Context"
+          }
+        },
+        "type": "object",
+        "required": [
+          "loc",
+          "msg",
+          "type"
+        ],
+        "title": "ValidationError"
+      }
+    }
+  }
+}

@@ -1,0 +1,41 @@
+llm:
+  max_concurrency: 5
+  max_retries: 3
+  providers:
+    google:
+      chunking_model: gemini-3-flash-preview
+      peeling_model: gemini-3.1-flash-lite-preview
+      skill_engine_model: gemini-3.1-flash-lite-preview
+    siliconflow:
+      chunking_model: deepseek-ai/DeepSeek-R1
+      peeling_model: deepseek-ai/DeepSeek-V3
+      skill_engine_model: THUDM/GLM-4-9B-0414
+    vectorengine:
+      base_url: https://api.vectorengine.ai
+      chunking_model: gpt-5.4
+      peeling_model: gpt-5.4-mini
+      skill_engine_model: gpt-5.4-nano
+  routers:
+    chunking_provider: siliconflow
+    peeling_provider: siliconflow
+    skill_engine_provider: siliconflow
+  timeout: 300
+mineru:
+  # Mode: 'remote' (official API) or 'local' (school server API)
+  api_mode: remote
+  language: ch
+  local:
+    base_url: http://localhost:8001
+    backend: hybrid-auto-engine
+    parse_method: auto
+    formula_enable: true
+    table_enable: true
+paths:
+  inputs_dir: inputs
+  logs_dir: logs
+  outputs_dir: outputs
+  prompts_dir: prompts
+pdf:
+  chunk_merge_threshold: 5000
+  chunk_min_threshold: 1000
+  page_limit: 200

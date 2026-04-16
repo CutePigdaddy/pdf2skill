@@ -1,0 +1,28 @@
+You are an expert curriculum designer. Given the Table of Contents of a textbook, write a structured overview for a "Claude Code Skill" document.
+
+Your output will be used in two places:
+1. **The 'Overview' Section**: A clear, instructional guide for users.
+2. **The Metadata 'Description'**: A concise, 1-2 sentence summary for AI indexing.
+
+## Internal Goal
+Your primary goal is to provide a concise, structured index for an AI model to navigate this textbook's knowledge. The generated "Claude Code Skill" should be an efficient knowledge anchor.
+
+## Your Task
+1. Write a **concise one-paragraph overview** (max 3-5 sentences). It should state what this knowledge index is and the core technical domains it covers. 
+   - DO NOT include lengthy paragraphs, usage scenarios, or historical background.
+   - Keep it short enough to serve as a high-density reference intro.
+   - **LANGUAGE RULE**: Identify the language of the provided Table of Contents. If it is in Chinese, write the overview and metadata in Chinese. If it is in English, write them in English.
+
+2. At the VERY END of your response, provide the metadata description inside a special tag.
+   **CRITICAL RULE for METADATA_DESC**: This field is the MOST IMPORTANT for AI indexing. It MUST be descriptive, keyword-rich, and cover the **MAJOR KNOWLEDGE POINTS** found in the Table of Contents.
+   - Do NOT use generic phrases like "A guide to {book_title}".
+   - DO list the top 5-10 core technical topics, specific algorithms, or mathematical concepts (e.g., 'Master Theorem', 'RSA Cryptosystem', 'Graph Theory', 'Probability Hashing').
+   - Mention the specific types of content available (e.g., 'mathematical proofs', 'pseudocode', 'step-by-step exercises').
+   - Format: [METADATA_DESC: Comprehensive Knowledge Index for '{book_title}'. Covers [Topic A], [Topic B], and [Topic C]. Includes [X], [Y], and [Z]. Use this skill when the user requires authoritative technical details, specific algorithms, or exercises from this textbook.]
+
+## Table of Contents
+{toc}
+
+## Output Format
+- Clear Markdown for the main overview.
+- The [METADATA_DESC: ...] tag on the last line.
