@@ -108,7 +108,7 @@ python main.py "path/to/your_book.pdf" --output "outputs"
 | :--- | :--- | :--- |
 | `mineru.api_mode` | MinerU 模式，`remote` 或 `local` | `remote` |
 | `mineru.language` | 传给 MinerU 的语言参数 | `ch` |
-| `mineru.local.base_url` | 本地 MinerU 服务地址 | `http://localhost:8001` |
+| `mineru.local.base_url` | 本地 MinerU 服务地址 | `http://localhost:7860` |
 | `mineru.local.backend` | 本地 MinerU 后端名 | `vlm-auto-engine` |
 | `llm.routers.chunking_provider` | 分块阶段使用的供应商 | `siliconflow` |
 | `llm.routers.peeling_provider` | Tree merge / peeling 阶段使用的供应商 | `siliconflow` |
