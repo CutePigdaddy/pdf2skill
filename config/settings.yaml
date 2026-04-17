@@ -26,8 +26,8 @@ mineru:
   # 语言配置：中文使用 'ch'，英语使用 'en'，俄语请配置为 'east_slavic'
   language: ch
   local:
-    base_url: http://localhost:8001
-    backend: vlm-auto-engine
+    base_url: http://localhost:7860
+    backend: hybrid-auto-engine
     parse_method: auto
     formula_enable: true
     table_enable: true

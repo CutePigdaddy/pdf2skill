@@ -187,95 +187,91 @@ class RemoteMinerUProcessor:
 class LocalMinerUProcessor:
     def __init__(self, language=None):
         self.language = language or config.get("mineru.language", "ch")
-        self.base_url = config.get("mineru.local.base_url", "http://127.0.0.1:8000").rstrip("/")
+        self.base_url = config.get("mineru.local.base_url", "http://127.0.0.1:7860").rstrip("/")
         self.backend = config.get("mineru.local.backend", "hybrid-auto-engine")
         self.parse_method = config.get("mineru.local.parse_method", "auto")
         self.formula_enable = config.get("mineru.local.formula_enable", True)
         self.table_enable = config.get("mineru.local.table_enable", True)
+        
+        # Load gradual gradio_client
+        try:
+            from gradio_client import Client, handle_file
+            self.Client = Client
+            self.handle_file = handle_file
+        except ImportError:
+            logger.error("gradio_client is required for new Local MinerU API. Please run: pip install gradio_client")
+            raise MinerUConversionError("gradio_client not installed")
+
+    def _get_gradio_language(self, short_lang):
+        """Map short lang codes to exact Gradio string required by the API."""
+        lang_map = {
+            "ch": "ch (Chinese, English, Chinese Traditional)",
+            "ch_lite": "ch_lite (Chinese, English, Chinese Traditional, Japanese)",
+            "ch_server": "ch_server (Chinese, English, Chinese Traditional, Japanese)",
+            "en": "en (English)",
+            "korean": "korean (Korean, English)",
+            "japan": "japan (Chinese, English, Chinese Traditional, Japanese)",
+            "chinese_cht": "chinese_cht (Chinese, English, Chinese Traditional, Japanese)",
+            "east_slavic": "east_slavic (Russian, Belarusian, Ukrainian, English)",
+            "cyrillic": "cyrillic (Russian, Belarusian, Ukrainian, Serbian (Cyrillic), Bulgarian, Mongolian, Abkhazian, Adyghe, Kabardian, Avar, Dargin, Ingush, Chechen, Lak, Lezgin, Tabasaran, Kazakh, Kyrgyz, Tajik, Macedonian, Tatar, Chuvash, Bashkir, Malian, Moldovan, Udmurt, Komi, Ossetian, Buryat, Kalmyk, Tuvan, Sakha, Karakalpak, English)",
+        }
+        return lang_map.get(short_lang, "ch (Chinese, English, Chinese Traditional)")
 
     def process(self, pdf_path: str, output_dir: str) -> Path:
         pdf_path, output_dir = Path(pdf_path), Path(output_dir)
         output_file = output_dir / "full.md"
-        
+
         if output_file.exists():
             logger.info("Markdown already generated. Skipping local conversion.")
             return output_file
-            
-        logger.info(f"Processing via Local MinerU API (no splitting): {pdf_path.name}")
-        
-        url = f"{self.base_url}/tasks"
-        
-        with open(pdf_path, "rb") as f:
-            files = {"files": (pdf_path.name, f, "application/pdf")}
-            # 确保 lang_list 符合 API 指定的数组格式
-            lang_payload = self.language if isinstance(self.language, list) else [self.language]
-            data = {
-                "lang_list": lang_payload,
-                "backend": self.backend,
-                "parse_method": self.parse_method,
-                "formula_enable": "true" if self.formula_enable else "false",
-                "table_enable": "true" if self.table_enable else "false",
-                "return_md": "true",
-                "response_format_zip": "true"
-            }
-            logger.info(f"Submitting task to {url} with backend={self.backend}")
-            resp = RetrySession.post(url, files=files, data=data, timeout=300)
-            
-            try:
-                resp.raise_for_status()
-            except requests.HTTPError as e:
-                logger.error(f"Local task submission failed: {resp.text}")
-                raise MinerUConversionError(f"HTTPError on local API: {e}")
 
-        task_data = resp.json()
-        task_id = task_data.get("task_id")
-        if not task_id:
-            raise MinerUConversionError(f"Failed to get task_id. Response: {task_data}")
-            
-        logger.info(f"Local Task ID: {task_id}, waiting for completion...")
+        logger.info(f"Processing via Local MinerU Gradio API (no splitting): {pdf_path.name}")
+
+        try:
+            client = self.Client(self.base_url)
+        except Exception as e:
+            raise MinerUConversionError(f"Failed to connect to Gradio server {self.base_url}: {e}")
+
+        # Resolve correct lang parameter
+        raw_lang = self.language[0] if isinstance(self.language, list) else self.language
+        gradio_lang = self._get_gradio_language(raw_lang)
+
+        logger.info(f"Submitting task to {self.base_url} with backend={self.backend}")
+        try:
+            result = client.predict(
+                file_path=self.handle_file(str(pdf_path)),
+                end_pages=10000,
+                is_ocr=False,
+                formula_enable=self.formula_enable,
+                table_enable=self.table_enable,
+                language=gradio_lang,
+                backend=self.backend,
+                url="http://localhost:30000",
+                api_name="/convert_to_markdown_stream",
+            )
+        except Exception as e:
+            logger.error(f"Gradio API Prediction failed: {e}")
+            raise MinerUConversionError(f"Prediction failed on local Gradio API: {e}")
+
+        # result is a tuple, result[1] is the ZIP filepath
+        output_zip_path = result[1] if len(result) > 1 else None
         
-        status_url = f"{self.base_url}/tasks/{task_id}"
-        timeout = 1800
-        start_time = time.time()
-        
-        while True:
-            if time.time() - start_time > timeout:
-                raise TimeoutError("Local MinerU conversion timed out.")
-                
-            resp = RetrySession.get(status_url)
-            resp.raise_for_status()
-            status_data = resp.json()
-            status = status_data.get("status")
-            
-            if status == "completed":
-                logger.info("Local MinerU extraction completed successfully!")
-                break
-            elif status in ["failed", "error"]:
-                raise MinerUConversionError(f"Local extraction failed: {status_data.get('message', 'Unknown error')}")
-                
-            logger.info(f"Local MinerU State: {status}...")
-            time.sleep(10)
-            
-        # Download Result Zip
-        result_url = f"{self.base_url}/tasks/{task_id}/result"
+        if not output_zip_path or not os.path.exists(output_zip_path):
+            raise MinerUConversionError(f"Gradio API did not return a valid ZIP path: {result}")
+
         logger.info("Downloading and extracting local results...")
-        resp = RetrySession.get(result_url, timeout=120)
-        resp.raise_for_status()
-        
         output_dir.mkdir(parents=True, exist_ok=True)
-        
+
         zip_path = output_dir / f"{pdf_path.stem}_mineru_output.zip"
-        with open(zip_path, "wb") as f_zip:
-            f_zip.write(resp.content)
+        shutil.copy2(output_zip_path, zip_path)
         logger.info(f"Saved raw local zip to {zip_path}")
-        
-        # Note: If response_format_zip=True, the result endpoint sends ZIP binary.
-        with zipfile.ZipFile(io.BytesIO(resp.content)) as zf:
+
+        with zipfile.ZipFile(zip_path, 'r') as zf:
             zf.extractall(output_dir)
             md_files = list(Path(output_dir).rglob("*.md"))
             if not md_files:
                 raise MinerUConversionError("Local API succeeded but no Markdown file found in the ZIP.")
-                
+
             md_file = md_files[-1]
             img_dir = md_file.parent / "images"
             if img_dir.exists():
@@ -284,7 +280,7 @@ class LocalMinerUProcessor:
                 for img in img_dir.glob("*"):
                     if img.is_file():
                         shutil.copy2(img, target_img_dir / img.name)
-                        
+
             md_text = md_file.read_text(encoding="utf-8")
             
         output_file.write_text(md_text, encoding="utf-8")
