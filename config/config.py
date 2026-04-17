@@ -1,6 +1,7 @@
 import os
 import yaml
 from pathlib import Path
+from dotenv import load_dotenv
 
 class Config:
     _instance = None
@@ -12,6 +13,7 @@ class Config:
         return cls._instance
         
     def _init_config(self, config_path):
+        load_dotenv()
         if config_path is None:
             config_path = Path(__file__).parent / "settings.yaml"
             
@@ -28,6 +30,22 @@ class Config:
             self._config['pdf']['chunk_merge_threshold'] = int(os.environ["CHUNK_MERGE_THRESHOLD"])
         if "CHUNK_MIN_THRESHOLD" in os.environ:
             self._config['pdf']['chunk_min_threshold'] = int(os.environ["CHUNK_MIN_THRESHOLD"])
+
+        # MinerU local server settings
+        if "MINERU_API_MODE" in os.environ:
+            self._config['mineru']['api_mode'] = os.environ["MINERU_API_MODE"]
+        if "MINERU_LANGUAGE" in os.environ:
+            self._config['mineru']['language'] = os.environ["MINERU_LANGUAGE"]
+        if "MINERU_LOCAL_BASE_URL" in os.environ:
+            self._config['mineru']['local']['base_url'] = os.environ["MINERU_LOCAL_BASE_URL"]
+        if "MINERU_LOCAL_BACKEND" in os.environ:
+            self._config['mineru']['local']['backend'] = os.environ["MINERU_LOCAL_BACKEND"]
+        if "MINERU_LOCAL_PARSE_METHOD" in os.environ:
+            self._config['mineru']['local']['parse_method'] = os.environ["MINERU_LOCAL_PARSE_METHOD"]
+        if "MINERU_LOCAL_FORMULA_ENABLE" in os.environ:
+            self._config['mineru']['local']['formula_enable'] = os.environ["MINERU_LOCAL_FORMULA_ENABLE"].lower() == "true"
+        if "MINERU_LOCAL_TABLE_ENABLE" in os.environ:
+            self._config['mineru']['local']['table_enable'] = os.environ["MINERU_LOCAL_TABLE_ENABLE"].lower() == "true"
             
         # LLM Stage Providers
         if "CHUNKING_PROVIDER" in os.environ:

@@ -57,6 +57,10 @@ python -m pip install -r requirements.txt
 # MinerU API 密钥
 MINERU_API_KEY="your_mineru_api_key"
 
+# 本地 MinerU 服务地址（如果你不是用公网地址，就在这里改）
+MINERU_LOCAL_BASE_URL="http://localhost:7860"
+MINERU_LOCAL_BACKEND="hybrid-auto-engine"
+
 # LLM 服务密钥（按你实际使用的供应商填写）
 SILICONFLOW_API_KEY="your_siliconflow_key"
 GOOGLE_API_KEY="your_google_key"
@@ -82,6 +86,8 @@ SILICONFLOW_SKILL_ENGINE_MODEL="THUDM/GLM-4-9B-0414"
 说明：
 
 - `MINERU_API_KEY`：远程 MinerU 转换必填。
+- `MINERU_LOCAL_BASE_URL`：本地 MinerU 服务地址，建议放在 `.env`，不要写死到仓库里。
+- `MINERU_LOCAL_BACKEND`：本地 MinerU 后端名，例如 `hybrid-auto-engine`。
 - `SILICONFLOW_API_KEY` / `GOOGLE_API_KEY` / `VECTORENGINE_API_KEY`：LLM 平台密钥，按你在 `settings.yaml` 里选择的 provider 准备。
 - `VECTORENGINE_BASE_URL`：当你通过 VectorEngine 网关调用时使用，默认值见 `settings.yaml`。
 - `CHUNKING_PROVIDER`、`PEELING_PROVIDER`、`SKILL_ENGINE_PROVIDER`：分别控制分块、剥皮/树合并、技能生成使用哪个供应商。
@@ -102,14 +108,21 @@ python main.py "path/to/your_book.pdf" --output "outputs"
 
 推荐的配置方式是：`settings.yaml` 放默认值，`.env` 放密钥和临时覆盖项。
 
+如果你使用的是本地 MinerU 服务，优先把服务器地址写在 `.env`：
+
+```bash
+MINERU_LOCAL_BASE_URL="http://localhost:7860"
+MINERU_LOCAL_BACKEND="hybrid-auto-engine"
+```
+
 ### `settings.yaml` 里能改什么
 
 | 配置项 | 说明 | 默认值 |
 | :--- | :--- | :--- |
 | `mineru.api_mode` | MinerU 模式，`remote` 或 `local` | `remote` |
 | `mineru.language` | 传给 MinerU 的语言参数 | `ch` |
-| `mineru.local.base_url` | 本地 MinerU 服务地址 | `http://localhost:7860` |
-| `mineru.local.backend` | 本地 MinerU 后端名 | `vlm-auto-engine` |
+| `mineru.local.base_url` | 本地 MinerU 服务地址，`.env` 可覆盖 | `http://localhost:7860` |
+| `mineru.local.backend` | 本地 MinerU 后端名，`.env` 可覆盖 | `vlm-auto-engine` |
 | `llm.routers.chunking_provider` | 分块阶段使用的供应商 | `siliconflow` |
 | `llm.routers.peeling_provider` | Tree merge / peeling 阶段使用的供应商 | `siliconflow` |
 | `llm.routers.skill_engine_provider` | SKILL 生成阶段使用的供应商 | `siliconflow` |
