@@ -27,7 +27,7 @@ mineru:
   language: ch
   local:
     base_url: http://localhost:7860
-    backend: hybrid-auto-engine
+    backend: vlm-auto-engine
     parse_method: auto
     formula_enable: true
     table_enable: true
