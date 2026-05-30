@@ -1,4 +1,4 @@
-import os
+﻿import os
 import sys
 import json
 import traceback
@@ -75,10 +75,6 @@ def test_api_connection(provider: str, model: str = None, test_json_mode: bool =
         traceback.print_exc()
         print("------------------------------")
         
-if __name__ == "__main__":
-    # 加载本地 .env配置
-    load_dotenv()
-    
 if __name__ == "__main__":
     # 加载本地 .env配置
     load_dotenv()
