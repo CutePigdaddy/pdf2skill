@@ -1,4 +1,4 @@
-import os
+﻿import os
 import yaml
 from pathlib import Path
 from dotenv import load_dotenv
@@ -56,7 +56,7 @@ class Config:
             self._config['llm']['routers']['skill_engine_provider'] = os.environ["SKILL_ENGINE_PROVIDER"]
             
         # Specific model overrides
-        for provider in ['siliconflow', 'google', 'openai', 'anthropic']:
+        for provider in ['siliconflow', 'google', 'vectorengine']:
             chunk_env = f"{provider.upper()}_CHUNKING_MODEL"
             if chunk_env in os.environ:
                 self._config['llm']['providers'][provider]['chunking_model'] = os.environ[chunk_env]
