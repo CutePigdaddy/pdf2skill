@@ -1,5 +1,4 @@
-﻿import os
-import sys
+import os
 import time
 import zipfile
 import io
