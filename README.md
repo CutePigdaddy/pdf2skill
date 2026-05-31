@@ -17,7 +17,7 @@
 
 ### 1. 安装
 
-```bash
+`ash
 # 创建虚拟环境
 python -m venv venv
 
@@ -29,7 +29,7 @@ venv\Scripts\activate
 
 # 安装依赖
 pip install -r requirements.txt
-```
+`
 
 ### 2. 必填配置
 
@@ -48,17 +48,17 @@ pip install -r requirements.txt
 
 **方式 A：交互式测试（推荐）**
 
-```bash
+`ash
 python run_test.py
-```
+`
 
 程序会逐步引导你选择 Provider、确认模型、输入文件路径，然后自动执行全流程。
 
 **方式 B：命令行直接调用**
 
-```bash
+`ash
 python main.py "path/to/your_book.pdf" --output outputs
-```
+`
 
 > 使用 main.py 时，Provider 和模型取 settings.yaml 默认值；如需覆盖请通过 .env 设置环境变量。
 
@@ -78,7 +78,7 @@ python main.py "path/to/your_book.pdf" --output outputs
 
 ### LLM Provider 配置
 
-所有 LLM 请求统一使用 OpenAI Chat Completions 兼容格式。Provider 在 settings.yaml 中自由定义，每个 Provider 需配置：
+所有 LLM 请求统一使用 OpenAI Chat Completions 兼容格式（POST {base_url}/chat/completions）。Provider 在 settings.yaml 中自由定义，每个 Provider 需配置：
 
 | 字段 | 说明 | 示例 |
 |------|------|------|
@@ -90,10 +90,15 @@ python main.py "path/to/your_book.pdf" --output outputs
 
 > **新增 Provider**：只需在 settings.yaml 的 providers: 下加一段配置，在 .env 中加对应 API Key，零 Python 代码改动。
 
-#### settings.yaml 示例
+#### settings.yaml 完整示例
 
-```yaml
+以下为当前项目内置的三个 Provider 及两个扩展示例：
+
+`yaml
 llm:
+  max_concurrency: 5
+  max_retries: 3
+  timeout: 300
   providers:
     siliconflow:
       base_url: https://api.siliconflow.cn/v1
@@ -107,6 +112,13 @@ llm:
       chunking_model: gemini-3-flash-preview
       peeling_model: gemini-3.1-flash-lite-preview
       skill_engine_model: gemini-3.1-flash-lite-preview
+    vectorengine:
+      base_url: https://api.vectorengine.ai/v1
+      api_key_env: VECTORENGINE_API_KEY
+      chunking_model: gpt-5.4
+      peeling_model: gpt-5.4-mini
+      skill_engine_model: gpt-5.4-nano
+    # --- 以下为扩展示例，按需添加 ---
     openrouter:
       base_url: https://openrouter.ai/api/v1
       api_key_env: OPENROUTER_API_KEY
@@ -129,7 +141,7 @@ llm:
     chunking_provider: siliconflow
     peeling_provider: siliconflow
     skill_engine_provider: siliconflow
-```
+`
 
 #### Provider 路由
 
@@ -143,9 +155,9 @@ llm:
 
 #### 环境变量覆盖规则
 
-Provider 的所有字段均支持环境变量覆盖，格式为 {PROVIDER}_{FIELD}：
+Provider 的所有字段均支持环境变量覆盖，格式为 {PROVIDER_NAME}_{FIELD}（Provider 名中的 - 替换为 _）：
 
-```bash
+`ash
 # 覆盖 siliconflow 的 base_url
 SILICONFLOW_BASE_URL="https://custom-proxy.example.com/v1"
 
@@ -154,7 +166,10 @@ GOOGLE_CHUNKING_MODEL="gemini-2.0-flash"
 
 # 覆盖 openrouter 的 API Key 环境变量名
 OPENROUTER_API_KEY_ENV="MY_CUSTOM_KEY_NAME"
-```
+
+# 覆盖 local-vllm 的 base_url（注意连字符转下划线）
+LOCAL_VLLM_BASE_URL="http://192.168.1.100:8000/v1"
+`
 
 **模型覆盖优先级**（从高到低）：
 1. {STAGE}_MODEL（如 CHUNKING_MODEL）— 全局覆盖，所有 Provider 生效
@@ -193,18 +208,18 @@ OPENROUTER_API_KEY_ENV="MY_CUSTOM_KEY_NAME"
 
 **1. 纯 SiliconFlow（最简配置）**
 
-```bash
+`ash
 # .env
 MINERU_API_KEY="your_mineru_key"
 SILICONFLOW_API_KEY="your_siliconflow_key"
 CHUNKING_PROVIDER="siliconflow"
 PEELING_PROVIDER="siliconflow"
 SKILL_ENGINE_PROVIDER="siliconflow"
-```
+`
 
 **2. 混合配置（分块用 SiliconFlow，其余用 Google）**
 
-```bash
+`ash
 # .env
 MINERU_API_KEY="your_mineru_key"
 SILICONFLOW_API_KEY="your_siliconflow_key"
@@ -212,11 +227,11 @@ GOOGLE_API_KEY="your_google_key"
 CHUNKING_PROVIDER="siliconflow"
 PEELING_PROVIDER="google"
 SKILL_ENGINE_PROVIDER="google"
-```
+`
 
 **3. 自定义 Provider（如 OpenRouter）**
 
-```yaml
+`yaml
 # settings.yaml — 添加 provider
 llm:
   providers:
@@ -226,19 +241,19 @@ llm:
       chunking_model: deepseek/deepseek-r1
       peeling_model: deepseek/deepseek-chat
       skill_engine_model: google/gemini-2.0-flash-001
-```
+`
 
-```bash
+`ash
 # .env — 添加 key
 OPENROUTER_API_KEY="your_openrouter_key"
 CHUNKING_PROVIDER="openrouter"
 PEELING_PROVIDER="openrouter"
 SKILL_ENGINE_PROVIDER="openrouter"
-```
+`
 
 **4. 本地 vLLM 服务**
 
-```yaml
+`yaml
 # settings.yaml — 添加 provider
 llm:
   providers:
@@ -248,19 +263,19 @@ llm:
       chunking_model: Qwen2.5-72B-Instruct
       peeling_model: Qwen2.5-32B-Instruct
       skill_engine_model: Qwen2.5-7B-Instruct
-```
+`
 
-```bash
+`ash
 # .env
 LOCAL_API_KEY="any-placeholder"  # vLLM 通常不需要 key，但字段不能为空
 CHUNKING_PROVIDER="local-vllm"
 PEELING_PROVIDER="local-vllm"
 SKILL_ENGINE_PROVIDER="local-vllm"
-```
+`
 
 ## 输出结构
 
-```
+`
 outputs/
 └── book_name/
     ├── .checkpoint.json        # 断点文件（支持续传）
@@ -272,18 +287,18 @@ outputs/
     └── generated_skills/       # Stage 4 生成的技能文件
         ├── SKILL.md            # 主索引
         └── references/         # 各 chunk 参考文件
-```
+`
 
 ## 项目结构
 
-```
-main.py              # 命令行入口
+`
+main.py            # 命令行入口
 run_test.py          # 交互式测试入口
 config/              # settings.yaml + config.py（单例，双层配置合并）
 core/                # pdf_processor / llm_chunker / tree_merger / skill_engine
 utils/               # logger / llm_client / retry_client / checkpoint
 prompts/             # 各阶段 LLM 提示词模板
-```
+`
 
 ## 许可证
 
