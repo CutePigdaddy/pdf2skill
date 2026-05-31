@@ -55,13 +55,20 @@ class LLMChunker:
             prompt = prompt.replace("{estimated_tokens}", str(total_chars // 2))
             
         logger.info("Requesting strategic split points from LLM...")
-        try:
-            response = self.llm.chat(prompt, is_json=True)
-            split_plan = self.llm.parse_json_response(response)
-        except Exception as e:
-            logger.error(f"Failed to get chunk strategy: {e}")
-            # Fallback to a single chunk if LLM fails
-            split_plan = {"chapter_splits": [1]}
+        split_plan = None
+        for attempt in range(2):
+            try:
+                response = self.llm.chat(prompt, is_json=True)
+                split_plan = self.llm.parse_json_response(response)
+                break
+            except Exception as e:
+                logger.warning(f"LLM chunk strategy attempt {attempt + 1} failed: {e}")
+        if split_plan is None:
+            logger.warning("All LLM attempts failed, falling back to uniform splitting")
+            total = len(lines)
+            num_chunks = max(1, total // 2000)
+            step = total // num_chunks
+            split_plan = {"chapter_splits": [i * step for i in range(1, num_chunks)]}
         
         return {
             "splits": split_plan.get("chapter_splits", []),

@@ -221,7 +221,7 @@ Return ONLY the JSON object. No prose."""
 
             anchors = result.get("anchors", [])
 
-        except (json.JSONDecodeError, Exception) as e:
+        except (json.JSONDecodeError, LLMParsingError, requests.RequestException) as e:
             logger.warning(f"    Could not parse LLM response: {e}")
             return [chunk]
 

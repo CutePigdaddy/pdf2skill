@@ -106,7 +106,7 @@ class SkillEngine:
                 checkpoint.save()
             except Exception as e:
                 logger.error(f"Error tagging chunk {node.id}: {e}")
-                summaries[node.id] = "Tagging failed"
+                # Not written to summaries so chunk can be retried on re-run
 
             # 3. Save reference Markdown with frontmatter
             ref_file = ref_dir / f"{node.id}.md"
