@@ -9,18 +9,18 @@ from PyPDF2 import PdfReader, PdfWriter
 from config.config import config
 from utils.logger import logger, MinerUConversionError
 from utils.retry_client import RetrySession
-from dotenv import load_dotenv
-
-load_dotenv()
-
-MINERU_API_KEY = os.getenv("MINERU_API_KEY")
 MINERU_BASE_URL = "https://mineru.net/api/v4"
 
 class RemoteMinerUProcessor:
     def __init__(self, language=None):
-        self.api_key = MINERU_API_KEY
+        from dotenv import load_dotenv
+        load_dotenv()
+        self.api_key = os.getenv("MINERU_API_KEY")
         if not self.api_key:
-            logger.warning("MINERU_API_KEY not found in environment for Remote API")
+            raise MinerUConversionError(
+                "MINERU_API_KEY not found in environment. "
+                "Set it in .env or environment variables for remote mode."
+            )
         self.language = language or config.get("mineru.language", "ch")
         self.headers = {
             "Authorization": f"Bearer {self.api_key}",

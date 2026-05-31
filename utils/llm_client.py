@@ -73,6 +73,10 @@ class LLMClient:
         }
         self.max_tokens = int(os.getenv(f"{stage.upper()}_MAX_TOKENS", max_tokens_by_stage.get(stage, 16000)))
         
+        self.headers = {
+            "Authorization": f"Bearer {self.api_key}",
+            "Content-Type": "application/json"
+        }
         self.timeout = config.get("llm.timeout", 120)
         self.request_interval = float(os.getenv("REQUEST_INTERVAL", config.get("llm.request_interval", 0.0)))
         logger.info(f"Initialized LLMClient [{self.stage}] -> provider: {self.provider}, model: {self.model}, base_url: {self.base_url}, interval: {self.request_interval}s")
@@ -84,12 +88,6 @@ class LLMClient:
             
         messages = [{"role": "user", "content": prompt}]
         tokens = max_tokens if max_tokens is not None else self.max_tokens
-        
-        # Build standard OpenAI Chat Completions request
-        headers = {
-            "Authorization": f"Bearer {self.api_key}",
-            "Content-Type": "application/json"
-        }
         
         if is_json:
             if messages[0]["role"] != "system":
@@ -106,8 +104,8 @@ class LLMClient:
             payload["response_format"] = {"type": "json_object"}
         
         url = f"{self.base_url}/chat/completions"
-        logger.debug(f"Sending OpenAI-compatible request to {url} with model {self.model}")
-        resp = RetrySession.post(url, headers=headers, json=payload, timeout=self.timeout)
+        logger.debug(f"Sending request to provider={self.provider} model={self.model}")
+        resp = RetrySession.post(url, headers=self.headers, json=payload, timeout=self.timeout)
         return resp.json()["choices"][0]["message"]["content"]
 
     def parse_json_response(self, text: str) -> dict:
@@ -124,5 +122,6 @@ class LLMClient:
                     clean_text = text[from_idx : to_idx + 1]
                     return ast.literal_eval(clean_text)
             except Exception as e:
-                raise LLMParsingError(f"Failed to parse JSON from LLM response: {e}\nResponse:\n{text}")
+                safe_text = text.replace(self.api_key, "***") if self.api_key else text
+                raise LLMParsingError(f"Failed to parse JSON from LLM response: {e}\nResponse:\n{safe_text}")
         raise LLMParsingError("Invalid JSON format from LLM.")
