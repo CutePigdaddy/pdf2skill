@@ -1,17 +1,23 @@
 llm:
   max_concurrency: 5
   max_retries: 3
+  timeout: 300
   providers:
-    google:
-      chunking_model: gemini-3-flash-preview
-      peeling_model: gemini-3.1-flash-lite-preview
-      skill_engine_model: gemini-3.1-flash-lite-preview
     siliconflow:
+      base_url: https://api.siliconflow.cn/v1
+      api_key_env: SILICONFLOW_API_KEY
       chunking_model: deepseek-ai/DeepSeek-R1
       peeling_model: deepseek-ai/DeepSeek-V3
       skill_engine_model: THUDM/GLM-4-9B-0414
+    google:
+      base_url: https://generativelanguage.googleapis.com/v1beta/openai
+      api_key_env: GOOGLE_API_KEY
+      chunking_model: gemini-3-flash-preview
+      peeling_model: gemini-3.1-flash-lite-preview
+      skill_engine_model: gemini-3.1-flash-lite-preview
     vectorengine:
-      base_url: https://api.vectorengine.ai
+      base_url: https://api.vectorengine.ai/v1
+      api_key_env: VECTORENGINE_API_KEY
       chunking_model: gpt-5.4
       peeling_model: gpt-5.4-mini
       skill_engine_model: gpt-5.4-nano
@@ -19,11 +25,8 @@ llm:
     chunking_provider: siliconflow
     peeling_provider: siliconflow
     skill_engine_provider: siliconflow
-  timeout: 300
 mineru:
-  # Mode: 'remote' (official API) or 'local' (school server API)
   api_mode: remote
-  # 语言配置：中文使用 'ch'，英语使用 'en'，俄语请配置为 'east_slavic'
   language: ch
   local:
     base_url: http://localhost:7860

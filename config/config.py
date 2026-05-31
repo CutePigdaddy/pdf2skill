@@ -1,4 +1,4 @@
-﻿import os
+import os
 import yaml
 from pathlib import Path
 from dotenv import load_dotenv
@@ -47,7 +47,7 @@ class Config:
         if "MINERU_LOCAL_TABLE_ENABLE" in os.environ:
             self._config['mineru']['local']['table_enable'] = os.environ["MINERU_LOCAL_TABLE_ENABLE"].lower() == "true"
             
-        # LLM Stage Providers
+        # LLM Stage Providers (routers)
         if "CHUNKING_PROVIDER" in os.environ:
             self._config['llm']['routers']['chunking_provider'] = os.environ["CHUNKING_PROVIDER"]
         if "PEELING_PROVIDER" in os.environ:
@@ -55,19 +55,15 @@ class Config:
         if "SKILL_ENGINE_PROVIDER" in os.environ:
             self._config['llm']['routers']['skill_engine_provider'] = os.environ["SKILL_ENGINE_PROVIDER"]
             
-        # Specific model overrides
-        for provider in ['siliconflow', 'google', 'vectorengine']:
-            chunk_env = f"{provider.upper()}_CHUNKING_MODEL"
-            if chunk_env in os.environ:
-                self._config['llm']['providers'][provider]['chunking_model'] = os.environ[chunk_env]
-                
-            peel_env = f"{provider.upper()}_PEELING_MODEL"
-            if peel_env in os.environ:
-                self._config['llm']['providers'][provider]['peeling_model'] = os.environ[peel_env]
-                
-            skill_env = f"{provider.upper()}_SKILL_ENGINE_MODEL"
-            if skill_env in os.environ:
-                self._config['llm']['providers'][provider]['skill_engine_model'] = os.environ[skill_env]
+        # Dynamically override any field for any provider via env vars:
+        # Format: {PROVIDER_NAME}_{FIELD} e.g. SILICONFLOW_BASE_URL, GOOGLE_CHUNKING_MODEL
+        providers = self._config.get('llm', {}).get('providers', {})
+        for provider_name in providers:
+            provider_upper = provider_name.upper().replace('-', '_')
+            for field in ['base_url', 'api_key_env', 'chunking_model', 'peeling_model', 'skill_engine_model']:
+                env_key = f"{provider_upper}_{field.upper()}"
+                if env_key in os.environ:
+                    providers[provider_name][field] = os.environ[env_key]
             
     def get(self, key, default=None):
         keys = key.split('.')

@@ -30,22 +30,44 @@ def setup_environment():
         api_key = prompt_user("Enter your MINERU_API_KEY")
         os.environ["MINERU_API_KEY"] = api_key
     else:
-        print(f"✓ MINERU_API_KEY is detected from environment/.env.")
+        print(f"✅ MINERU_API_KEY is detected from environment/.env.")
 
-    # Select LLM Provider for Chunking
+    # Select LLM Provider for each stage
     print("\n[2] LLM Provider Configuration")
-    print("You can select different providers for each stage (Chunking, Peeling, Skill Engine).")
     
-    def select_provider(stage_name, default_val="1"):
-        choice = prompt_user(f"Select API provider for {stage_name} (1: VectorEngine, 2: SiliconFlow, 3: Google)", default_val)
-        if choice == "1": return "vectorengine"
-        elif choice == "2": return "siliconflow"
-        elif choice == "3": return "google"
-        return "vectorengine"
+    from config.config import config
+    
+    available_providers = list(config.get("llm.providers", {}).keys())
+    if not available_providers:
+        print("[ERROR] No providers configured in settings.yaml. Please add at least one provider.")
+        sys.exit(1)
+    
+    provider_list_str = ", ".join(f"{i+1}: {p}" for i, p in enumerate(available_providers))
+    default_provider = available_providers[0]
+    
+    print(f"You can select different providers for each stage. Available: {provider_list_str}")
+    
+    def select_provider(stage_name):
+        default_idx = str(available_providers.index(default_provider) + 1)
+        choice = prompt_user(
+            f"Select API provider for {stage_name} ({provider_list_str})",
+            default_idx
+        )
+        try:
+            idx = int(choice) - 1
+            if 0 <= idx < len(available_providers):
+                return available_providers[idx]
+        except ValueError:
+            pass
+        # Allow direct name input
+        if choice in available_providers:
+            return choice
+        print(f"Invalid choice, defaulting to '{default_provider}'")
+        return default_provider
 
-    chunk_provider = select_provider("CHUNKING", "1")
-    peel_provider = select_provider("PEELING", "1")
-    skill_provider = select_provider("SKILL ENGINE", "1")
+    chunk_provider = select_provider("CHUNKING")
+    peel_provider = select_provider("PEELING")
+    skill_provider = select_provider("SKILL ENGINE")
 
     os.environ["CHUNKING_PROVIDER"] = chunk_provider
     os.environ["PEELING_PROVIDER"] = peel_provider
@@ -54,31 +76,26 @@ def setup_environment():
     print("\n[3] Model Override (Optional)")
     print("Default models are set in config/settings.yaml. Press Enter to use defaults, or input model names to override.")
     
-    from config.config import config
-    
-    # helper to get model with specific provider
     def get_model_config(provider, stage):
-        return config.get(f"llm.providers.{provider}.{stage}_model")
+        return config.get(f"llm.providers.{provider}.{stage}_model", "")
 
     chunk_model = prompt_user(f"Enter CHUNKING model ({chunk_provider})", get_model_config(chunk_provider, "chunking"))
     peel_model = prompt_user(f"Enter PEELING model ({peel_provider})", get_model_config(peel_provider, "peeling"))
     skill_model = prompt_user(f"Enter SKILL ENGINE model ({skill_provider})", get_model_config(skill_provider, "skill_engine"))
     
-    # Update environment for the current run
     os.environ["CHUNKING_MODEL"] = chunk_model
     os.environ["PEELING_MODEL"] = peel_model
     os.environ["SKILL_ENGINE_MODEL"] = skill_model
         
     print(f"\n[4] API Key Verification")
-    # Prompt for the chosen providers' API keys
-    needed_keys = set([chunk_provider, peel_provider, skill_provider])
-    for p in needed_keys:
-        key_env = f"{p.upper()}_API_KEY"
-        if not os.getenv(key_env):
-            api_key = prompt_user(f"Enter your {key_env}")
-            os.environ[key_env] = api_key
+    needed_providers = set([chunk_provider, peel_provider, skill_provider])
+    for p in needed_providers:
+        api_key_env = config.get(f"llm.providers.{p}.api_key_env", f"{p.upper()}_API_KEY")
+        if not os.getenv(api_key_env):
+            api_key = prompt_user(f"Enter your {api_key_env}")
+            os.environ[api_key_env] = api_key
         else:
-            print(f"✓ KEY for {p} is already set.")
+            print(f"✅ KEY for {p} is already set.")
 
     # Request Interval Configuration
     print("\n[5] Request Interval Configuration")
@@ -131,18 +148,15 @@ if __name__ == "__main__":
     try:
         target_file, out_dir, mode = setup_environment()
         
-        # Import config and main AFTER environment variables are set
         from main import run_pipeline
         from utils.checkpoint import CheckpointManager
         
         print("\n🚀 Starting Pipeline...\n")
         
-        # If markdown mode, we bypass stage 1 by pre-marking checkpoint
         if mode == "markdown":
             out_path = Path(out_dir)
             out_path.mkdir(parents=True, exist_ok=True)
             checkpoint = CheckpointManager(out_path)
-            # This will make the pipeline think stage 1 is already finished using this MD
             checkpoint.mark_stage_completed("pdf_conversion", {"md_file": target_file})
             
         run_pipeline(target_file, out_dir)
