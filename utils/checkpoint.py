@@ -2,6 +2,8 @@ import json
 from pathlib import Path
 from utils.logger import logger
 
+CHECKPOINT_VERSION = 1
+
 class CheckpointManager:
     def __init__(self, output_dir: Path):
         self.output_dir = Path(output_dir)
@@ -12,13 +14,21 @@ class CheckpointManager:
         if self.checkpoint_file.exists():
             try:
                 with open(self.checkpoint_file, 'r', encoding='utf-8') as f:
-                    return json.load(f)
-            except Exception as e:
-                logger.warning(f"Failed to load checkpoint: {e}")
-        return {"completed_stages": [], "data": {}}
+                    data = json.load(f)
+                if data.get("version") != CHECKPOINT_VERSION:
+                    logger.warning(
+                        f"Checkpoint version mismatch (expected {CHECKPOINT_VERSION}, "
+                        f"got {data.get('version')}). Resetting checkpoint."
+                    )
+                    return {"version": CHECKPOINT_VERSION, "completed_stages": [], "data": {}}
+                return data
+            except (json.JSONDecodeError, Exception) as e:
+                logger.warning(f"Failed to load checkpoint: {e}. Resetting.")
+        return {"version": CHECKPOINT_VERSION, "completed_stages": [], "data": {}}
 
     def save(self):
         self.output_dir.mkdir(parents=True, exist_ok=True)
+        self.state["version"] = CHECKPOINT_VERSION
         with open(self.checkpoint_file, 'w', encoding='utf-8') as f:
             json.dump(self.state, f, ensure_ascii=False, indent=2)
             

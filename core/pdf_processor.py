@@ -83,7 +83,7 @@ class RemoteMinerUProcessor:
     def _upload_file(self, upload_url: str, file_path: Path):
         logger.info(f"Uploading file: {file_path.name}")
         with open(file_path, "rb") as f:
-            resp = RetrySession.post(upload_url, data=f, timeout=300) # Large timeout for files
+            RetrySession.post(upload_url, data=f, timeout=300)
         logger.info("Upload complete!")
         return True
 

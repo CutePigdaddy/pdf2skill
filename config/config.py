@@ -16,13 +16,23 @@ class Config:
         load_dotenv()
         if config_path is None:
             config_path = Path(__file__).parent / "settings.yaml"
-            
-        with open(config_path, 'r', encoding='utf-8') as f:
-            self._config = yaml.safe_load(f)
+        try:
+            with open(config_path, 'r', encoding='utf-8') as f:
+                self._config = yaml.safe_load(f) or {}
+        except FileNotFoundError:
+            self._config = {}
             
         self.merge_env_vars()
         
     def merge_env_vars(self):
+        # Ensure required top-level keys exist so env overrides do not KeyError
+        self._config.setdefault("pdf", {})
+        self._config.setdefault("mineru", {})
+        self._config["mineru"].setdefault("local", {})
+        self._config.setdefault("llm", {})
+        self._config["llm"].setdefault("routers", {})
+        self._config["llm"].setdefault("providers", {})
+
         # Override with environment variables if present
         if "PDF_PAGE_LIMIT" in os.environ:
             self._config['pdf']['page_limit'] = int(os.environ["PDF_PAGE_LIMIT"])

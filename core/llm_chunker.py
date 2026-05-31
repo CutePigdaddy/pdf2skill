@@ -84,8 +84,8 @@ class LLMChunker:
         lines = []
         for h in headers:
             # Inclue more levels for better context if necessary, but keep it concise
-            if h.level > 4: continue
-            indent = "  " * (h.level - 1)
+            if h.level > 4:
+                continue
             # Use a more descriptive format for the LLM
             lines.append(f"[Line {h.line_number}] {'#' * h.level} {h.text}")
         return "\n".join(lines)
@@ -101,7 +101,6 @@ class LLMChunker:
         # Get atomic ranges (Exercises, Appendix, References, etc.)
         # These are used as informational metadata but we only force ATOMIC for TOC,
         # otherwise we loose the ability to peel through large sections containing exercises.
-        atomic_ranges = split_data.get("atomic_ranges", {})
         toc_range = split_data.get("toc_range", None)
         
         chunks = []

@@ -1,10 +1,10 @@
 import re
 import json
-import uuid
 import shutil
+import requests
 from pathlib import Path
 from dataclasses import dataclass, field
-from utils.logger import logger
+from utils.logger import logger, LLMParsingError
 from utils.llm_client import LLMClient
 from config.config import config
 from Levenshtein import distance as levenshtein_distance
@@ -226,7 +226,7 @@ Return ONLY the JSON object. No prose."""
             return [chunk]
 
         if not anchors:
-            logger.info(f"    No anchors found, keeping chunk as-is")
+            logger.info("    No anchors found, keeping chunk as-is")
             return [chunk]
 
         split_positions = [0]
@@ -252,7 +252,7 @@ Return ONLY the JSON object. No prose."""
         suggested_titles = [x[1] for x in combined]
 
         if len(split_positions) <= 2:
-            logger.info(f"    No valid split positions found")
+            logger.info("    No valid split positions found")
             return [chunk]
 
         raw_child_chunks = []
