@@ -17,7 +17,7 @@
 
 ### 1. 安装
 
-`ash
+```bash
 # 创建虚拟环境
 python -m venv venv
 
@@ -29,7 +29,7 @@ venv\Scripts\activate
 
 # 安装依赖
 pip install -r requirements.txt
-`
+```
 
 ### 2. 必填配置
 
@@ -48,19 +48,39 @@ pip install -r requirements.txt
 
 **方式 A：交互式测试（推荐）**
 
-`ash
+```bash
 python run_test.py
-`
+```
 
 程序会逐步引导你选择 Provider、确认模型、输入文件路径，然后自动执行全流程。
 
 **方式 B：命令行直接调用**
 
-`ash
+```bash
 python main.py "path/to/your_book.pdf" --output outputs
-`
+```
 
 > 使用 main.py 时，Provider 和模型取 settings.yaml 默认值；如需覆盖请通过 .env 设置环境变量。
+
+
+## 首次运行引导
+
+新用户首次运行 `python main.py` 时，程序会自动检测配置状态。如果 `.env` 文件缺失或必要配置项未填写，将自动启动引导向导（onboarding wizard），帮助你完成初始配置。
+
+引导流程共 4 步：
+
+1. **MinerU 配置** — 选择 remote（云端 API）或 local（本地 Gradio 服务）模式，输入对应的 API Key 或服务地址
+2. **LLM Provider 选择** — 从 `settings.yaml` 已配置的 Provider 中选择默认供应商
+3. **API Key 填写** — 为所选 Provider 输入 API Key（已设置的自动跳过）
+4. **模型确认** — 展示各阶段默认模型，可直接回车跳过或输入覆盖
+
+引导完成后配置写入 `.env` 文件，后续运行不再触发。如需重新配置：
+
+```bash
+python main.py --setup
+```
+
+> 引导过程中随时输入 `q` 可退出，不会保存任何更改。
 
 ## 配置详解
 
@@ -82,8 +102,8 @@ python main.py "path/to/your_book.pdf" --output outputs
 
 | 字段 | 说明 | 示例 |
 |------|------|------|
-| ase_url | OpenAI 兼容 API 的 base URL（不含 /chat/completions，程序自动拼接） | https://api.siliconflow.cn/v1 |
-| pi_key_env | 存放 API Key 的环境变量名，程序通过 os.getenv() 读取 | SILICONFLOW_API_KEY |
+| base_url | OpenAI 兼容 API 的 base URL（不含 /chat/completions，程序自动拼接） | https://api.siliconflow.cn/v1 |
+| api_key_env | 存放 API Key 的环境变量名，程序通过 os.getenv() 读取 | SILICONFLOW_API_KEY |
 | chunking_model | Chunking 阶段使用的模型 | deepseek-ai/DeepSeek-R1 |
 | peeling_model | Peeling 阶段使用的模型 | deepseek-ai/DeepSeek-V3 |
 | skill_engine_model | Skill Engine 阶段使用的模型 | THUDM/GLM-4-9B-0414 |
@@ -94,7 +114,7 @@ python main.py "path/to/your_book.pdf" --output outputs
 
 以下为当前项目内置的三个 Provider 及两个扩展示例：
 
-`yaml
+```yaml
 llm:
   max_concurrency: 5
   max_retries: 3
@@ -141,7 +161,7 @@ llm:
     chunking_provider: siliconflow
     peeling_provider: siliconflow
     skill_engine_provider: siliconflow
-`
+```
 
 #### Provider 路由
 
@@ -157,7 +177,7 @@ llm:
 
 Provider 的所有字段均支持环境变量覆盖，格式为 {PROVIDER_NAME}_{FIELD}（Provider 名中的 - 替换为 _）：
 
-`ash
+```bash
 # 覆盖 siliconflow 的 base_url
 SILICONFLOW_BASE_URL="https://custom-proxy.example.com/v1"
 
@@ -169,7 +189,7 @@ OPENROUTER_API_KEY_ENV="MY_CUSTOM_KEY_NAME"
 
 # 覆盖 local-vllm 的 base_url（注意连字符转下划线）
 LOCAL_VLLM_BASE_URL="http://192.168.1.100:8000/v1"
-`
+```
 
 **模型覆盖优先级**（从高到低）：
 1. {STAGE}_MODEL（如 CHUNKING_MODEL）— 全局覆盖，所有 Provider 生效
@@ -180,13 +200,13 @@ LOCAL_VLLM_BASE_URL="http://192.168.1.100:8000/v1"
 
 | 变量名 | 说明 | 默认值 |
 |--------|------|--------|
-| MINERU_API_MODE | emote（官方 API）或 local（本地 Gradio 服务） | emote |
+| MINERU_API_MODE | remote（官方 API）或 local（本地 Gradio 服务） | remote |
 | MINERU_LANGUAGE | 语言：ch（中文）、en（英文）、east_slavic（俄语等） | ch |
 | MINERU_LOCAL_BASE_URL | 本地 Gradio 服务地址（local 模式必填） | http://localhost:7860 |
-| MINERU_LOCAL_BACKEND | 本地解析后端 | lm-auto-engine |
-| MINERU_LOCAL_PARSE_METHOD | 解析方法 | uto |
-| MINERU_LOCAL_FORMULA_ENABLE | 启用公式识别 | 	rue |
-| MINERU_LOCAL_TABLE_ENABLE | 启用表格识别 | 	rue |
+| MINERU_LOCAL_BACKEND | 本地解析后端 | vlm-auto-engine |
+| MINERU_LOCAL_PARSE_METHOD | 解析方法 | auto |
+| MINERU_LOCAL_FORMULA_ENABLE | 启用公式识别 | true |
+| MINERU_LOCAL_TABLE_ENABLE | 启用表格识别 | true |
 
 > **Local 模式**需要先启动 MinerU Gradio 服务（默认端口 7860），项目会通过 gradio_client 自动连接。
 
@@ -208,18 +228,18 @@ LOCAL_VLLM_BASE_URL="http://192.168.1.100:8000/v1"
 
 **1. 纯 SiliconFlow（最简配置）**
 
-`ash
+```bash
 # .env
 MINERU_API_KEY="your_mineru_key"
 SILICONFLOW_API_KEY="your_siliconflow_key"
 CHUNKING_PROVIDER="siliconflow"
 PEELING_PROVIDER="siliconflow"
 SKILL_ENGINE_PROVIDER="siliconflow"
-`
+```
 
 **2. 混合配置（分块用 SiliconFlow，其余用 Google）**
 
-`ash
+```bash
 # .env
 MINERU_API_KEY="your_mineru_key"
 SILICONFLOW_API_KEY="your_siliconflow_key"
@@ -227,11 +247,11 @@ GOOGLE_API_KEY="your_google_key"
 CHUNKING_PROVIDER="siliconflow"
 PEELING_PROVIDER="google"
 SKILL_ENGINE_PROVIDER="google"
-`
+```
 
 **3. 自定义 Provider（如 OpenRouter）**
 
-`yaml
+```yaml
 # settings.yaml — 添加 provider
 llm:
   providers:
@@ -241,19 +261,19 @@ llm:
       chunking_model: deepseek/deepseek-r1
       peeling_model: deepseek/deepseek-chat
       skill_engine_model: google/gemini-2.0-flash-001
-`
+```
 
-`ash
+```bash
 # .env — 添加 key
 OPENROUTER_API_KEY="your_openrouter_key"
 CHUNKING_PROVIDER="openrouter"
 PEELING_PROVIDER="openrouter"
 SKILL_ENGINE_PROVIDER="openrouter"
-`
+```
 
 **4. 本地 vLLM 服务**
 
-`yaml
+```yaml
 # settings.yaml — 添加 provider
 llm:
   providers:
@@ -263,19 +283,19 @@ llm:
       chunking_model: Qwen2.5-72B-Instruct
       peeling_model: Qwen2.5-32B-Instruct
       skill_engine_model: Qwen2.5-7B-Instruct
-`
+```
 
-`ash
+```bash
 # .env
 LOCAL_API_KEY="any-placeholder"  # vLLM 通常不需要 key，但字段不能为空
 CHUNKING_PROVIDER="local-vllm"
 PEELING_PROVIDER="local-vllm"
 SKILL_ENGINE_PROVIDER="local-vllm"
-`
+```
 
 ## 输出结构
 
-`
+```
 outputs/
 └── book_name/
     ├── .checkpoint.json        # 断点文件（支持续传）
@@ -287,18 +307,18 @@ outputs/
     └── generated_skills/       # Stage 4 生成的技能文件
         ├── SKILL.md            # 主索引
         └── references/         # 各 chunk 参考文件
-`
+```
 
 ## 项目结构
 
-`
+```
 main.py            # 命令行入口
 run_test.py          # 交互式测试入口
 config/              # settings.yaml + config.py（单例，双层配置合并）
-core/                # pdf_processor / llm_chunker / tree_merger / skill_engine
+core/                # pdf_processor / llm_chunker / tree_merger / skill_engine / onboarding
 utils/               # logger / llm_client / retry_client / checkpoint
 prompts/             # 各阶段 LLM 提示词模板
-`
+```
 
 ## 许可证
 

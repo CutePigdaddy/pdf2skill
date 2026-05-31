@@ -12,6 +12,7 @@ from core.pdf_processor import PDFProcessor
 from core.llm_chunker import LLMChunker
 from core.tree_merger import TreeMerger, ChunkNode
 from core.skill_engine import SkillEngine
+from core.onboarding import OnboardingWizard
 
 def run_pipeline(pdf_path: str, output_dir: str):
     logger.info(f"Starting pipeline for {pdf_path}")
@@ -71,14 +72,25 @@ def run_pipeline(pdf_path: str, output_dir: str):
 
 def main():
     parser = argparse.ArgumentParser(description="PDF2Skills v2 - Refactored Pipeline")
-    parser.add_argument("pdf_path", type=str, help="Path to the PDF file")
+    parser.add_argument("pdf_path", type=str, nargs='?', help="Path to the PDF file")
     parser.add_argument("--output", type=str, default="outputs", help="Output directory")
+    parser.add_argument("--setup", action="store_true", help="Run the onboarding wizard to configure settings")
     args = parser.parse_args()
-    
+
+    project_root = Path(__file__).parent
+    wizard = OnboardingWizard(project_root)
+
+    if args.setup or wizard.needs_onboarding():
+        if not wizard.run():
+            sys.exit(0)
+
+    if not args.pdf_path:
+        parser.error("pdf_path is required after setup")
+
     try:
         run_pipeline(args.pdf_path, args.output)
     except Exception as e:
-        logger.exception(f"Pipeline crashed: {e}")
+        logger.exception("Pipeline crashed: {}".format(e))
         sys.exit(1)
 
 if __name__ == "__main__":
