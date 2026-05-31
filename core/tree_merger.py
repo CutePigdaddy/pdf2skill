@@ -75,6 +75,7 @@ class TreeMerger:
         """
         Locates the position of a sub-header anchor in the text.
         Uses Levenshtein distance for fuzzy matching to handle LLM minor variations.
+        Skips fuzzy matching for very large content to avoid O(n*m) CPU cost.
         """
         anchor = anchor.strip()
         if not anchor:
@@ -84,21 +85,35 @@ class TreeMerger:
         if pos != -1:
             return pos
 
-        # Fuzzy match if exact match fails
+        # Skip expensive fuzzy matching for very large content to prevent CPU DoS
+        content_len = len(content)
         anchor_len = len(anchor)
+        if content_len > 50000:
+            logger.warning(
+                f"Content too large ({content_len} chars) for fuzzy anchor matching, skipping"
+            )
+            return -1
+
+        # Fuzzy match if exact match fails
         best_pos = -1
         best_distance = float('inf')
-        # Use a more conservative threshold for long content to avoid random matches
-        threshold = max(2, anchor_len // 5) 
+        threshold = max(2, anchor_len // 5)
 
-        # Optimization: Search within a sliding window if the content is huge
-        # (Though content is limited to 40k in prompt, the full text might be 100k+)
-        for i in range(len(content) - anchor_len + 1):
-            window = content[i:i + anchor_len]
-            dist = levenshtein_distance(anchor, window)
-            if dist < best_distance and dist <= threshold:
-                best_distance = dist
-                best_pos = i
+        # Limit search window to first and last 20% of content for large texts
+        if content_len > 20000:
+            search_start = 0
+            search_end = int(content_len * 0.2)
+            search_ranges = [(search_start, search_end), (int(content_len * 0.8), content_len)]
+        else:
+            search_ranges = [(0, content_len)]
+
+        for rng_start, rng_end in search_ranges:
+            for i in range(rng_start, min(rng_end, content_len - anchor_len + 1)):
+                window = content[i:i + anchor_len]
+                dist = levenshtein_distance(anchor, window)
+                if dist < best_distance and dist <= threshold:
+                    best_distance = dist
+                    best_pos = i
 
         return best_pos
 
