@@ -2,37 +2,20 @@
 
 将 PDF 教材、文档和书籍自动转换为结构化知识索引与可复用技能库。
 
-[![Python Version](https://img.shields.io/badge/python-3.9+-blue.svg)](https://www.python.org/downloads/)
-[![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
-[![MinerU](https://img.shields.io/badge/Engine-MinerU-orange.svg)](https://mineru.net/)
+**GitHub Description**: PDF to skill pipeline for turning books and documents into structured knowledge chunks and reusable `SKILL.md` outputs.
 
-**pdf2skill** 会把 PDF 解析、切片、合并并生成 `SKILL.md`，适合把教材、技术文档、学术书籍整理成适合大模型检索和复用的知识库。
+## 功能特性
 
-**GitHub 仓库简介**：PDF to skill pipeline for turning books and documents into structured knowledge chunks and reusable `SKILL.md` outputs.
-
-## 核心功能
-
-- **文档处理**：支持 PDF 转 Markdown，并保留后续分块所需的结构信息。
-- **语义切片**：
-  - 保护不可分割的逻辑单元（如练习题、代码块、定理）。
-  - 自动合并小片段，确保每个 Chunk 具备足够的语义信息。
-  - 在章节标题处精准切分，避免内容粘连。
-- **智能命名**：根据内容自动生成复合标题，提升检索精度。
-- **多模型支持**：支持 Google Gemini、SiliconFlow 等模型供应商。
-- **断点续传**：通过 checkpoint 机制支持从中断步骤继续执行。
-
-## 工作流程
-
-1. **输入 PDF**：支持单文件或批量处理。
-2. **预处理**：根据页面阈值进行物理切分（可选）。
-3. **转换与切片**：
-   - 使用 MinerU 将 PDF 转换为 Markdown。
-   - 通过 LLM 进行策略性分块和语义切片。
-4. **树合并与技能生成**：生成层级化的 chunk 结构和最终 `SKILL.md`。
+- **PDF 解析**：基于 MinerU 引擎，支持 remote API 和 local Gradio 双模式，自动保留公式、表格与图片
+- **语义切片**：LLM 驱动的策略性分块，保护不可分割的逻辑单元（习题集、定理证明、代码块）
+- **树状合并**：递归剥离大块内容，通过 Levenshtein 模糊匹配定位子标题，直至每块在 token 阈值内
+- **技能生成**：为每个 chunk 提取关键词标签，生成 `SKILL.md` 主索引和独立参考文件
+- **多模型支持**：三阶段（Chunking / Peeling / Skill Engine）可独立选择 SiliconFlow、Google Gemini 或 VectorEngine
+- **断点续传**：基于 checkpoint 机制，中断后从已完成阶段继续执行
 
 ## 快速开始
 
-### 环境准备
+### 1. 安装
 
 ```bash
 # 创建虚拟环境
@@ -41,126 +24,152 @@ python -m venv venv
 # Windows
 venv\Scripts\activate
 
-# 安装依赖
-python -m pip install -r requirements.txt
-
-# Linux/macOS
+# Linux / macOS
 # source venv/bin/activate
-# python -m pip install -r requirements.txt
+
+# 安装依赖
+pip install -r requirements.txt
 ```
 
-### 配置鉴权
+### 2. 必填配置
 
-在项目根目录创建 `.env` 文件。程序启动时会自动读取它，然后覆盖 `settings.yaml` 里的部分默认值。
+在项目根目录创建 `.env` 文件，填入以下至少一项 API Key：
+
+| 变量名 | 说明 | 获取方式 |
+|--------|------|----------|
+| `MINERU_API_KEY` | MinerU 远程转换服务密钥（remote 模式必填） | [mineru.net](https://mineru.net/) 注册 |
+| `SILICONFLOW_API_KEY` | SiliconFlow LLM 平台密钥 | [siliconflow.cn](https://siliconflow.cn/) 注册 |
+| `GOOGLE_API_KEY` | Google Gemini API 密钥 | [Google AI Studio](https://aistudio.google.com/) 获取 |
+| `VECTORENGINE_API_KEY` | VectorEngine 网关密钥 | 联系平台方获取 |
+
+> **最少配置**：只需一个 LLM Provider 的 Key + `MINERU_API_KEY`（remote 模式时）。使用 local Gradio 模式时不需要 `MINERU_API_KEY`。
+
+### 3. 运行
+
+**方式 A：交互式测试（推荐）**
 
 ```bash
-# MinerU API 密钥
-MINERU_API_KEY="your_mineru_api_key"
+python run_test.py
+```
 
-# 本地 MinerU 服务地址（如果你不是用公网地址，就在这里改）
-MINERU_LOCAL_BASE_URL="http://localhost:7860"
-MINERU_LOCAL_BACKEND="hybrid-auto-engine"
+程序会逐步引导你选择 Provider、确认模型、输入文件路径，然后自动执行全流程。
 
-# LLM 服务密钥（按你实际使用的供应商填写）
+**方式 B：命令行直接调用**
+
+```bash
+python main.py "path/to/your_book.pdf" --output outputs
+```
+
+> 使用 `main.py` 时，Provider 和模型读取 `settings.yaml` 默认值；如需覆盖请通过 `.env` 设置环境变量。
+
+## 配置详解
+
+### .env vs settings.yaml：何时改哪个
+
+| 场景 | 改哪个 |
+|------|--------|
+| 存放 API 密钥 | `.env` |
+| 临时切换 Provider 或模型 | `.env` |
+| 覆盖某个默认值而不改仓库 | `.env` |
+| 项目长期默认配置 | `settings.yaml` |
+| 团队统一的基线设置 | `settings.yaml` |
+
+> **原则**：密钥和临时覆盖放 `.env`，长期默认放 `settings.yaml`。`.env` 已在 `.gitignore` 中，不会被提交。
+
+### LLM Provider 配置
+
+本项目的三个阶段可以独立选择不同的 LLM Provider：
+
+| 阶段 | 环境变量 | 作用 |
+|------|----------|------|
+| 分块（Chunking） | `CHUNKING_PROVIDER` | 控制 Stage 2 使用哪个 Provider |
+| 剥离（Peeling） | `PEELING_PROVIDER` | 控制 Stage 3 使用哪个 Provider |
+| 技能生成（Skill Engine） | `SKILL_ENGINE_PROVIDER` | 控制 Stage 4 使用哪个 Provider |
+
+每个 Provider 需要的 Key：
+
+| Provider | 必填 Key | 可选 Base URL |
+|----------|----------|----------------|
+| `siliconflow` | `SILICONFLOW_API_KEY` | `SILICONFLOW_BASE_URL`（默认 `https://api.siliconflow.cn/v1`） |
+| `google` | `GOOGLE_API_KEY` | `GOOGLE_BASE_URL`（默认 Google 官方） |
+| `vectorengine` | `VECTORENGINE_API_KEY` | `VECTORENGINE_BASE_URL`（默认 `https://api.vectorengine.ai`） |
+
+> **注意**：`settings.yaml` 中 `routers` 默认值为 `siliconflow`，而 `run_test.py` 交互菜单选项 1 默认为 `vectorengine`。使用 `run_test.py` 时会通过环境变量覆盖，二者不冲突；使用 `main.py` 直接调用时走 `settings.yaml` 默认值。
+
+### MinerU 配置
+
+| 变量名 | 说明 | 默认值 |
+|--------|------|--------|
+| `MINERU_API_KEY` | 远程 API 密钥（remote 模式必填） | 无 |
+| `MINERU_API_MODE` | `remote`（官方 API）或 `local`（本地 Gradio 服务） | `remote` |
+| `MINERU_LANGUAGE` | 语言：`ch`（中文）、`en`（英文）、`east_slavic`（俄语等） | `ch` |
+| `MINERU_LOCAL_BASE_URL` | 本地 Gradio 服务地址（local 模式必填） | `http://localhost:7860` |
+| `MINERU_LOCAL_BACKEND` | 本地解析后端 | `vlm-auto-engine` |
+| `MINERU_LOCAL_PARSE_METHOD` | 解析方法 | `auto` |
+| `MINERU_LOCAL_FORMULA_ENABLE` | 启用公式识别 | `true` |
+| `MINERU_LOCAL_TABLE_ENABLE` | 启用表格识别 | `true` |
+
+> **Local 模式**需要先启动 MinerU Gradio 服务（默认端口 7860），项目会通过 `gradio_client` 自动连接。
+
+### PDF 处理参数
+
+| 变量名 | 说明 | 默认值 | 调优建议 |
+|--------|------|--------|----------|
+| `PDF_PAGE_LIMIT` | 单个 PDF 最大页数，超出会物理切分 | `200` | 大文件可调高，但需注意 API 限制 |
+| `CHUNK_MERGE_THRESHOLD` | 合并分片时的字符阈值 | `5000` | 值越大 chunk 越大，减少 LLM 调用但增加单次 token |
+| `CHUNK_MIN_THRESHOLD` | 触发合并的最小字符长度 | `1000` | 低于此值的相邻片段会合并，避免过度碎片化 |
+
+### 请求控制
+
+| 变量名 | 说明 | 默认值 |
+|--------|------|--------|
+| `REQUEST_INTERVAL` | API 请求间隔（秒），避免触发限流 | `1.0` |
+
+### 高级：模型覆盖
+
+如需覆盖具体模型名而不改 `settings.yaml`，使用以下环境变量命名规则：
+
+```
+{STAGE}_MODEL                          # 全局覆盖（所有 provider 生效）
+{PROVIDER}_{STAGE}_MODEL               # 指定 provider+阶段覆盖
+```
+
+例如：
+
+```bash
+# 全局：无论哪个 provider，分块都用这个模型
+CHUNKING_MODEL="deepseek-ai/DeepSeek-V3"
+
+# 指定：仅 Google 的分块阶段使用此模型
+GOOGLE_CHUNKING_MODEL="gemini-2.0-flash"
+```
+
+**优先级**（从高到低）：
+
+1. `{STAGE}_MODEL`（如 `CHUNKING_MODEL`）
+2. `{PROVIDER}_{STAGE}_MODEL`（如 `GOOGLE_CHUNKING_MODEL`）
+3. `settings.yaml` 中 `llm.providers.{provider}.{stage}_model`
+4. 代码内置 `fallback_map`（仅在 yaml 项缺失时触发）
+
+> `fallback_map` 中的部分模型名可能落后于 `settings.yaml`，正常情况下 yaml 优先加载，fallback 不会触发。
+
+## 配置示例
+
+**1. 纯 SiliconFlow（最简配置）**
+
+```bash
+# .env
+MINERU_API_KEY="your_mineru_key"
 SILICONFLOW_API_KEY="your_siliconflow_key"
-GOOGLE_API_KEY="your_google_key"
-VECTORENGINE_API_KEY="your_vectorengine_key"
-
-# 可选：VectorEngine 网关地址
-VECTORENGINE_BASE_URL="https://api.vectorengine.ai"
-
-# 可选：覆盖配置文件中的默认值
 CHUNKING_PROVIDER="siliconflow"
 PEELING_PROVIDER="siliconflow"
 SKILL_ENGINE_PROVIDER="siliconflow"
-PDF_PAGE_LIMIT="200"
-CHUNK_MERGE_THRESHOLD="5000"
-CHUNK_MIN_THRESHOLD="1000"
-
-# 可选：覆盖具体模型名
-SILICONFLOW_CHUNKING_MODEL="deepseek-ai/DeepSeek-R1"
-SILICONFLOW_PEELING_MODEL="deepseek-ai/DeepSeek-V3"
-SILICONFLOW_SKILL_ENGINE_MODEL="THUDM/GLM-4-9B-0414"
 ```
 
-说明：
-
-- `MINERU_API_KEY`：远程 MinerU 转换必填。
-- `MINERU_LOCAL_BASE_URL`：本地 MinerU 服务地址，建议放在 `.env`，不要写死到仓库里。
-- `MINERU_LOCAL_BACKEND`：本地 MinerU 后端名，例如 `hybrid-auto-engine`。
-- `SILICONFLOW_API_KEY` / `GOOGLE_API_KEY` / `VECTORENGINE_API_KEY`：LLM 平台密钥，按你在 `settings.yaml` 里选择的 provider 准备。
-- `VECTORENGINE_BASE_URL`：当你通过 VectorEngine 网关调用时使用，默认值见 `settings.yaml`。
-- `CHUNKING_PROVIDER`、`PEELING_PROVIDER`、`SKILL_ENGINE_PROVIDER`：分别控制分块、剥皮/树合并、技能生成使用哪个供应商。
-- `PDF_PAGE_LIMIT`、`CHUNK_MERGE_THRESHOLD`、`CHUNK_MIN_THRESHOLD`：覆盖 `settings.yaml` 中的 PDF 阈值配置。
-- `*_CHUNKING_MODEL`、`*_PEELING_MODEL`、`*_SKILL_ENGINE_MODEL`：覆盖具体模型名，适合你想临时切换模型而不改 YAML。
-
-### 运行工具
+**2. 纯 VectorEngine（统一网关）**
 
 ```bash
-python main.py "path/to/your_book.pdf" --output "outputs"
-```
-
-默认输出目录为 `outputs/`。每本书会生成独立子目录，包含中间切片、合并后的结果和最终技能文件。
-
-## 配置
-
-配置文件路径：`config/settings.yaml`
-
-推荐的配置方式是：`settings.yaml` 放默认值，`.env` 放密钥和临时覆盖项。
-
-如果你使用的是本地 MinerU 服务，优先把服务器地址写在 `.env`：
-
-```bash
-MINERU_LOCAL_BASE_URL="http://localhost:7860"
-MINERU_LOCAL_BACKEND="hybrid-auto-engine"
-```
-
-### `settings.yaml` 里能改什么
-
-| 配置项 | 说明 | 默认值 |
-| :--- | :--- | :--- |
-| `mineru.api_mode` | MinerU 模式，`remote` 或 `local` | `remote` |
-| `mineru.language` | 传给 MinerU 的语言参数 | `ch` |
-| `mineru.local.base_url` | 本地 MinerU 服务地址，`.env` 可覆盖 | `http://localhost:7860` |
-| `mineru.local.backend` | 本地 MinerU 后端名，`.env` 可覆盖 | `vlm-auto-engine` |
-| `llm.routers.chunking_provider` | 分块阶段使用的供应商 | `siliconflow` |
-| `llm.routers.peeling_provider` | Tree merge / peeling 阶段使用的供应商 | `siliconflow` |
-| `llm.routers.skill_engine_provider` | SKILL 生成阶段使用的供应商 | `siliconflow` |
-| `llm.providers.google.*` | Google 模型名 | 见 `settings.yaml` |
-| `llm.providers.siliconflow.*` | SiliconFlow 模型名 | 见 `settings.yaml` |
-| `llm.providers.vectorengine.*` | VectorEngine 模型名和 base url | 见 `settings.yaml` |
-| `llm.max_concurrency` | 并发请求数 | `5` |
-| `llm.max_retries` | 失败重试次数 | `3` |
-| `llm.timeout` | 单次请求超时时间（秒） | `300` |
-| `pdf.chunk_merge_threshold` | 合并分片时的阈值 | `5000` |
-| `pdf.chunk_min_threshold` | 触发合并的最小字符长度 | `1000` |
-| `pdf.page_limit` | 单个 PDF 最多处理页数，超出会切分 | `200` |
-
-### 什么时候改 `.env`，什么时候改 `settings.yaml`
-
-- 改 `.env`：密钥、临时换模型、临时切换 provider、想不改仓库默认值的时候。
-- 改 `settings.yaml`：项目的长期默认配置，比如你团队固定用哪个供应商、默认语言、PDF 页数阈值。
-- 不要把真实密钥提交到 GitHub。
-
-### 统一按 OpenAI compatible 网关配置
-
-如果你希望把三段 LLM 配置尽量统一，可以直接把 VectorEngine 当成一个 OpenAI compatible 网关来用。代码里会优先按这个思路调用：
-
-- 模型名不包含 `claude` 时，默认走 `POST /v1/chat/completions`
-- 模型名包含 `gemini` 时，走 Gemini 兼容接口
-- 模型名包含 `claude` 时，走 Anthropic 兼容接口
-
-如果你只想统一成一套最简单的配置，通常只需要下面这些项：
-
-- `.env` 里的 `VECTORENGINE_API_KEY`
-- `.env` 里的 `VECTORENGINE_BASE_URL`（可选）
-- `settings.yaml` 里的 `llm.providers.vectorengine.base_url`
-- `settings.yaml` 里的 `llm.providers.vectorengine.chunking_model`、`peeling_model`、`skill_engine_model`
-- `.env` 里的 `CHUNKING_PROVIDER`、`PEELING_PROVIDER`、`SKILL_ENGINE_PROVIDER`（如果你要让某个阶段走 VectorEngine）
-
-推荐写法：
-
-```bash
+# .env
 VECTORENGINE_API_KEY="your_vectorengine_key"
 VECTORENGINE_BASE_URL="https://api.vectorengine.ai"
 CHUNKING_PROVIDER="vectorengine"
@@ -171,78 +180,43 @@ VECTORENGINE_PEELING_MODEL="gpt-5.4-mini"
 VECTORENGINE_SKILL_ENGINE_MODEL="gpt-5.4-nano"
 ```
 
-如果你更偏向把默认值写进仓库配置，也可以直接改 `settings.yaml`：
-
-```yaml
-llm:
-  routers:
-    chunking_provider: vectorengine
-    peeling_provider: vectorengine
-    skill_engine_provider: vectorengine
-  providers:
-    vectorengine:
-      base_url: https://api.vectorengine.ai
-      chunking_model: gpt-5.4
-      peeling_model: gpt-5.4-mini
-      skill_engine_model: gpt-5.4-nano
-```
-
-### 常见配置示例
-
-**1. 只用 SiliconFlow**
+**3. 混合配置（分块用 SiliconFlow，其余用 Google）**
 
 ```bash
-MINERU_API_KEY="your_mineru_api_key"
+# .env
+MINERU_API_KEY="your_mineru_key"
 SILICONFLOW_API_KEY="your_siliconflow_key"
+GOOGLE_API_KEY="your_google_key"
 CHUNKING_PROVIDER="siliconflow"
-PEELING_PROVIDER="siliconflow"
-SKILL_ENGINE_PROVIDER="siliconflow"
-```
-
-**2. 只改 PDF 切分阈值**
-
-```bash
-PDF_PAGE_LIMIT="120"
-CHUNK_MERGE_THRESHOLD="4000"
-CHUNK_MIN_THRESHOLD="800"
-```
-
-**3. 直接改 `settings.yaml` 的模型**
-
-```yaml
-llm:
-  routers:
-    chunking_provider: google
-    peeling_provider: google
-    skill_engine_provider: google
-  providers:
-    google:
-      chunking_model: gemini-3-flash-preview
-      peeling_model: gemini-3.1-flash-lite-preview
-      skill_engine_model: gemini-3.1-flash-lite-preview
+PEELING_PROVIDER="google"
+SKILL_ENGINE_PROVIDER="google"
 ```
 
 ## 输出结构
 
-```text
+```
 outputs/
-└── [book_name]/
-  ├── checkpoint.json
-  ├── full_chunks_original/
-  │   └── chunks/
-  ├── full_chunks/
-  │   └── chunks/
-  └── generated_skills/
-    └── SKILL.md
+└── book_name/
+    ├── .checkpoint.json        # 断点文件（支持续传）
+    ├── full_chunks_original/   # Stage 2 原始分块
+    ├── full_chunks/            # Stage 3 剥离后分块
+    │   ├── chunks/
+    │   ├── chunks_index.json
+    │   └── tree.json
+    └── generated_skills/       # Stage 4 生成的技能文件
+        ├── SKILL.md            # 主索引
+        └── references/        # 各 chunk 参考文件
 ```
 
 ## 项目结构
 
-```text
-main.py                 # 命令行入口
-config/                 # 配置加载与默认设置
-core/                   # PDF 处理、分块、树合并、技能生成
-utils/                  # 日志、重试与 checkpoint 工具
+```
+main.py              # 命令行入口
+run_test.py          # 交互式测试入口
+config/              # settings.yaml + config.py（单例，双层配置合并）
+core/                # pdf_processor / llm_chunker / tree_merger / skill_engine
+utils/               # logger / llm_client / retry_client / checkpoint
+prompts/             # 各阶段 LLM 提示词模板
 ```
 
 ## 许可证
