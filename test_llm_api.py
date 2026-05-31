@@ -11,7 +11,7 @@ sys.path.append(str(Path(__file__).parent))
 from utils.llm_client import LLMClient
 from utils.logger import LLMParsingError
 
-def test_api_connection(provider: str, model: str = None, test_json_mode: bool = False):
+def check_api_connection(provider: str, model: str = None, test_json_mode: bool = False):
     """
     测试单个 LLM Provider 的连通性和功能
     """
