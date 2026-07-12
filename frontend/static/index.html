@@ -1,0 +1,421 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>PDF2Skill</title>
+<style>
+  :root { --bg: #0f1117; --card: #1a1d27; --border: #2a2d3a; --text: #e0e0e0; --dim: #888; --accent: #6c8cff; --green: #4ade80; --red: #f87171; --yellow: #fbbf24; }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: var(--bg); color: var(--text); min-height: 100vh; }
+  .header { padding: 16px 24px; border-bottom: 1px solid var(--border); display: flex; align-items: center; gap: 12px; }
+  .header h1 { font-size: 18px; font-weight: 600; }
+  .header .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--green); }
+  .tabs { display: flex; gap: 0; border-bottom: 1px solid var(--border); }
+  .tab { padding: 10px 20px; cursor: pointer; color: var(--dim); font-size: 14px; border-bottom: 2px solid transparent; transition: all .15s; }
+  .tab:hover { color: var(--text); }
+  .tab.active { color: var(--accent); border-bottom-color: var(--accent); }
+  .panel { display: none; padding: 20px 24px; max-width: 960px; }
+  .panel.active { display: block; }
+  label { display: block; font-size: 13px; color: var(--dim); margin: 12px 0 4px; }
+  select, input[type="text"], input[type="number"], input[type="password"] {
+    width: 100%; max-width: 400px; padding: 8px 10px; background: var(--bg); border: 1px solid var(--border);
+    border-radius: 6px; color: var(--text); font-size: 14px; outline: none;
+  }
+  select:focus, input:focus { border-color: var(--accent); }
+  .row { display: flex; gap: 16px; flex-wrap: wrap; }
+  .row > div { flex: 1; min-width: 200px; }
+  .btn { padding: 8px 20px; border: none; border-radius: 6px; cursor: pointer; font-size: 14px; font-weight: 500; transition: all .15s; }
+  .btn-primary { background: var(--accent); color: #fff; }
+  .btn-primary:hover { filter: brightness(1.15); }
+  .btn-primary:disabled { opacity: .5; cursor: not-allowed; }
+  .btn-danger { background: var(--red); color: #fff; }
+  .btn-danger:hover { filter: brightness(1.15); }
+  .btn-sm { padding: 4px 12px; font-size: 12px; }
+  .status { display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 12px; font-weight: 600; }
+  .status-running { background: #1e3a5f; color: var(--accent); }
+  .status-done { background: #1a3a2a; color: var(--green); }
+  .status-failed { background: #3a1a1a; color: var(--red); }
+  .log-box { background: #000; border: 1px solid var(--border); border-radius: 6px; padding: 12px;
+    font-family: 'Cascadia Code', 'Fira Code', monospace; font-size: 12px; line-height: 1.5;
+    max-height: 500px; overflow-y: auto; white-space: pre-wrap; word-break: break-all; color: #ccc; }
+  .tree { font-size: 13px; line-height: 1.8; }
+  .tree-item { cursor: pointer; padding: 2px 6px; border-radius: 4px; }
+  .tree-item:hover { background: var(--border); }
+  .tree-dir::before { content: '📁 '; }
+  .tree-file::before { content: '📄 '; }
+  .tree-children { padding-left: 20px; }
+  .file-viewer { background: var(--card); border: 1px solid var(--border); border-radius: 6px; padding: 16px;
+    font-family: 'Cascadia Code', monospace; font-size: 13px; white-space: pre-wrap; word-break: break-all;
+    max-height: 500px; overflow-y: auto; margin-top: 12px; display: none; }
+  .key-row { display: flex; align-items: center; gap: 8px; margin: 6px 0; }
+  .key-row input { max-width: 300px; }
+  .key-badge { font-size: 11px; padding: 2px 6px; border-radius: 4px; }
+  .key-set { background: #1a3a2a; color: var(--green); }
+  .key-missing { background: #3a1a1a; color: var(--red); }
+  .saved-toast { position: fixed; bottom: 24px; right: 24px; background: var(--green); color: #000;
+    padding: 8px 16px; border-radius: 6px; font-size: 14px; font-weight: 600; opacity: 0; transition: opacity .3s; }
+  .saved-toast.show { opacity: 1; }
+</style>
+</head>
+<body>
+
+<div class="header">
+  <div class="dot"></div>
+  <h1>PDF2Skill</h1>
+</div>
+
+<div class="tabs">
+  <div class="tab active" data-tab="config">⚙ 配置</div>
+  <div class="tab" data-tab="run">▶ 运行</div>
+  <div class="tab" data-tab="outputs">📂 输出</div>
+</div>
+
+<!-- ═══ Config Panel ═══ -->
+<div class="panel active" id="panel-config">
+  <h3 style="margin-bottom:8px">Provider 配置</h3>
+  <p style="font-size:13px;color:var(--dim);margin-bottom:12px">每个阶段可独立选择 Provider 和模型。修改后点击保存。</p>
+
+  <div class="row">
+    <div>
+      <label>Chunking Provider</label>
+      <select id="chunk-provider"></select>
+      <label>Chunking Model</label>
+      <input type="text" id="chunk-model">
+    </div>
+    <div>
+      <label>Peeling Provider</label>
+      <select id="peel-provider"></select>
+      <label>Peeling Model</label>
+      <input type="text" id="peel-model">
+    </div>
+    <div>
+      <label>Skill Engine Provider</label>
+      <select id="skill-provider"></select>
+      <label>Skill Engine Model</label>
+      <input type="text" id="skill-model">
+    </div>
+  </div>
+
+  <label>Request Interval (秒)</label>
+  <input type="number" id="request-interval" style="max-width:120px" step="0.5" min="0">
+
+  <h3 style="margin:20px 0 8px">API Keys</h3>
+  <div id="apikey-section"></div>
+
+  <div style="margin-top:20px">
+    <button class="btn btn-primary" onclick="saveConfig()">💾 保存配置</button>
+  </div>
+</div>
+
+<!-- ═══ Run Panel ═══ -->
+<div class="panel" id="panel-run">
+  <div class="row">
+    <div>
+      <label>输入文件 (inputs/)</label>
+      <select id="input-file"></select>
+    </div>
+    <div>
+      <label>输入模式</label>
+      <select id="input-mode">
+        <option value="pdf">PDF</option>
+        <option value="markdown">Markdown</option>
+      </select>
+    </div>
+    <div>
+      <label>输出目录</label>
+      <input type="text" id="output-dir" placeholder="自动生成">
+    </div>
+  </div>
+
+  <div style="margin-top:16px;display:flex;gap:8px;align-items:center">
+    <button class="btn btn-primary" id="btn-start" onclick="startPipeline()">🚀 开始运行</button>
+    <button class="btn btn-danger" id="btn-stop" onclick="stopPipeline()" style="display:none">⏹ 停止</button>
+    <span id="run-status"></span>
+  </div>
+
+  <h3 style="margin:16px 0 8px">运行日志</h3>
+  <div class="log-box" id="log-box">等待运行...</div>
+</div>
+
+<!-- ═══ Outputs Panel ═══ -->
+<div class="panel" id="panel-outputs">
+  <div style="display:flex;gap:8px;align-items:center;margin-bottom:12px">
+    <button class="btn btn-sm btn-primary" onclick="loadOutputs()">🔄 刷新</button>
+    <span style="font-size:13px;color:var(--dim)">点击文件名预览内容</span>
+  </div>
+  <div class="tree" id="output-tree"></div>
+  <div class="file-viewer" id="file-viewer"></div>
+</div>
+
+<div class="saved-toast" id="toast">已保存</div>
+
+<script>
+// ── Globals ──────────────────────────────────────────────────────
+let configData = null;
+let providerNames = [];
+let currentJobId = null;
+let logPollTimer = null;
+
+// ── Tab switching ────────────────────────────────────────────────
+document.querySelectorAll('.tab').forEach(tab => {
+  tab.addEventListener('click', () => {
+    document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+    document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
+    tab.classList.add('active');
+    document.getElementById('panel-' + tab.dataset.tab).classList.add('active');
+    if (tab.dataset.tab === 'outputs') loadOutputs();
+  });
+});
+
+// ── API helpers ──────────────────────────────────────────────────
+async function api(path, opts = {}) {
+  const res = await fetch(path, { headers: { 'Content-Type': 'application/json' }, ...opts });
+  if (!res.ok) { const e = await res.text(); throw new Error(e); }
+  return res.json();
+}
+
+// ── Config ───────────────────────────────────────────────────────
+async function loadConfig() {
+  const data = await api('/api/config');
+  configData = data.settings;
+  providerNames = Object.keys(configData.llm?.providers || {});
+
+  const stages = [
+    { sel: 'chunk-provider', router: 'chunking_provider', model: 'chunk-model', modelKey: 'chunking_model' },
+    { sel: 'peel-provider', router: 'peeling_provider', model: 'peel-model', modelKey: 'peeling_model' },
+    { sel: 'skill-provider', router: 'skill_engine_provider', model: 'skill-model', modelKey: 'skill_engine_model' },
+  ];
+  stages.forEach(s => {
+    const sel = document.getElementById(s.sel);
+    sel.innerHTML = providerNames.map(n => `<option value="${n}">${n}</option>`).join('');
+    const selected = configData.llm?.routers?.[s.router] || providerNames[0];
+    sel.value = selected;
+    const modelVal = configData.llm?.providers?.[selected]?.[s.modelKey] || '';
+    document.getElementById(s.model).value = modelVal;
+    sel.addEventListener('change', () => {
+      document.getElementById(s.model).value = configData.llm?.providers?.[sel.value]?.[s.modelKey] || '';
+    });
+  });
+
+  document.getElementById('request-interval').value = configData.llm?.request_interval ?? 1.0;
+
+  // API keys
+  const section = document.getElementById('apikey-section');
+  section.innerHTML = '';
+  const masked = data.providers_masked || {};
+  for (const [name, info] of Object.entries(masked)) {
+    const envVar = info.api_key_env || `${name.toUpperCase()}_API_KEY`;
+    const set = info.api_key_set;
+    const preview = info.api_key_preview || '';
+    section.innerHTML += `
+      <div class="key-row">
+        <strong style="min-width:100px">${name}</strong>
+        <span class="key-badge ${set ? 'key-set' : 'key-missing'}">${set ? '✓ ' + preview : '✗ 未设置'}</span>
+        <input type="password" id="key-${name}" placeholder="输入 ${envVar}" style="max-width:260px">
+        <button class="btn btn-sm btn-primary" onclick="setKey('${envVar}','key-${name}')">设置</button>
+      </div>`;
+  }
+}
+
+async function saveConfig() {
+  const routers = {
+    chunking_provider: document.getElementById('chunk-provider').value,
+    peeling_provider: document.getElementById('peel-provider').value,
+    skill_engine_provider: document.getElementById('skill-provider').value,
+  };
+  const providers = {};
+  const stagesConfig = [
+    { provider: routers.chunking_provider, modelKey: 'chunking_model', modelVal: document.getElementById('chunk-model').value },
+    { provider: routers.peeling_provider, modelKey: 'peeling_model', modelVal: document.getElementById('peel-model').value },
+    { provider: routers.skill_engine_provider, modelKey: 'skill_engine_model', modelVal: document.getElementById('skill-model').value },
+  ];
+  stagesConfig.forEach(s => {
+    if (!providers[s.provider]) providers[s.provider] = {};
+    providers[s.provider][s.modelKey] = s.modelVal;
+  });
+
+  await api('/api/config', {
+    method: 'POST',
+    body: JSON.stringify({ providers, routers, pdf: { request_interval: parseFloat(document.getElementById('request-interval').value) } }),
+  });
+  showToast('配置已保存');
+}
+
+async function setKey(envVar, inputId) {
+  const val = document.getElementById(inputId).value;
+  if (!val) return;
+  await api('/api/apikey', { method: 'POST', body: JSON.stringify({ env_var: envVar, value: val }) });
+  document.getElementById(inputId).value = '';
+  showToast('Key 已设置');
+  loadConfig();
+}
+
+function showToast(msg) {
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.classList.add('show');
+  setTimeout(() => t.classList.remove('show'), 2000);
+}
+
+// ── Inputs ───────────────────────────────────────────────────────
+async function loadInputs() {
+  const data = await api('/api/inputs');
+  const sel = document.getElementById('input-file');
+  sel.innerHTML = '<option value="">— 选择文件 —</option>';
+  for (const f of data.files) {
+    const size = (f.size / 1024 / 1024).toFixed(1);
+    sel.innerHTML += `<option value="${f.relative}">${f.name} (${size}MB)</option>`;
+  }
+  sel.addEventListener('change', () => {
+    const opt = sel.value;
+    if (opt) {
+      document.getElementById('input-mode').value = opt.toLowerCase().endsWith('.md') ? 'markdown' : 'pdf';
+      const stem = opt.replace(/\.[^.]+$/, '');
+      document.getElementById('output-dir').value = 'outputs/' + stem;
+    }
+  });
+}
+
+// ── Pipeline ─────────────────────────────────────────────────────
+async function startPipeline() {
+  const inputFile = document.getElementById('input-file').value;
+  if (!inputFile) { alert('请选择输入文件'); return; }
+
+  const body = {
+    input_file: inputFile,
+    mode: document.getElementById('input-mode').value,
+    output_dir: document.getElementById('output-dir').value,
+    chunk_provider: document.getElementById('chunk-provider').value,
+    peel_provider: document.getElementById('peel-provider').value,
+    skill_provider: document.getElementById('skill-provider').value,
+    chunk_model: document.getElementById('chunk-model').value,
+    peel_model: document.getElementById('peel-model').value,
+    skill_model: document.getElementById('skill-model').value,
+    request_interval: document.getElementById('request-interval').value,
+  };
+
+  try {
+    const res = await api('/api/run', { method: 'POST', body: JSON.stringify(body) });
+    currentJobId = res.job_id;
+    document.getElementById('btn-start').disabled = true;
+    document.getElementById('btn-stop').style.display = 'inline-block';
+    document.getElementById('run-status').innerHTML = '<span class="status status-running">运行中</span>';
+    document.getElementById('log-box').textContent = '';
+    pollLog();
+  } catch (e) {
+    alert('启动失败: ' + e.message);
+  }
+}
+
+async function stopPipeline() {
+  if (!currentJobId) return;
+  await api('/api/stop', { method: 'POST', body: JSON.stringify({ job_id: currentJobId }) });
+  finishJob('stopped');
+}
+
+async function pollLog() {
+  if (!currentJobId) return;
+  try {
+    const data = await api(`/api/status?job_id=${currentJobId}`);
+    document.getElementById('log-box').textContent = data.log || '(无日志)';
+    const box = document.getElementById('log-box');
+    box.scrollTop = box.scrollHeight;
+    if (data.status === 'running') {
+      logPollTimer = setTimeout(pollLog, 2000);
+    } else {
+      finishJob(data.status);
+    }
+  } catch (e) {
+    logPollTimer = setTimeout(pollLog, 3000);
+  }
+}
+
+function finishJob(status) {
+  clearTimeout(logPollTimer);
+  document.getElementById('btn-start').disabled = false;
+  document.getElementById('btn-stop').style.display = 'none';
+  const cls = status === 'done' ? 'status-done' : status === 'failed' ? 'status-failed' : 'status-running';
+  const label = status === 'done' ? '✓ 完成' : status === 'failed' ? '✗ 失败' : status;
+  document.getElementById('run-status').innerHTML = `<span class="status ${cls}">${label}</span>`;
+}
+
+// ── Outputs ──────────────────────────────────────────────────────
+async function loadOutputs() {
+  const data = await api('/api/outputs');
+  const treeEl = document.getElementById('output-tree');
+  treeEl.innerHTML = '';
+  if (!data.tree?.children?.length) {
+    treeEl.innerHTML = '<p style="color:var(--dim)">outputs/ 目录为空</p>';
+    return;
+  }
+  renderTree(data.tree, treeEl, '');
+}
+
+function renderTree(node, parentEl, pathPrefix) {
+  if (!node.children) return;
+  for (const child of node.children) {
+    const childPath = pathPrefix ? pathPrefix + '/' + child.name.replace('/', '') : child.name.replace('/', '');
+    const div = document.createElement('div');
+
+    if (child.type === 'dir') {
+      const item = document.createElement('div');
+      item.className = 'tree-item tree-dir';
+      const label = child.count != null ? `${child.name} (${child.count} files)` : child.name;
+      item.textContent = label;
+      div.appendChild(item);
+
+      const childrenDiv = document.createElement('div');
+      childrenDiv.className = 'tree-children';
+      childrenDiv.style.display = 'none';
+      div.appendChild(childrenDiv);
+
+      item.addEventListener('click', () => {
+        const open = childrenDiv.style.display !== 'none';
+        childrenDiv.style.display = open ? 'none' : 'block';
+        if (!open && !childrenDiv.hasChildNodes()) {
+          renderTree(child, childrenDiv, childPath);
+        }
+      });
+    } else {
+      const item = document.createElement('div');
+      item.className = 'tree-item tree-file';
+      const kb = child.size ? ` (${(child.size / 1024).toFixed(1)}KB)` : '';
+      item.textContent = child.name + kb;
+      item.addEventListener('click', () => previewFile(childPath));
+      div.appendChild(item);
+    }
+    parentEl.appendChild(div);
+  }
+}
+
+async function previewFile(path) {
+  const viewer = document.getElementById('file-viewer');
+  try {
+    const res = await fetch(`/api/outputs/file?path=${encodeURIComponent(path)}`);
+    if (!res.ok) throw new Error(await res.text());
+    const ct = res.headers.get('content-type') || '';
+    if (ct.startsWith('image/')) {
+      viewer.style.display = 'block';
+      viewer.innerHTML = `<img src="${res.url}" style="max-width:100%">`;
+    } else {
+      const data = await res.json();
+      viewer.style.display = 'block';
+      if (data.type === 'text') {
+        viewer.textContent = data.content;
+      } else {
+        viewer.textContent = `(Binary file, ${data.size} bytes)`;
+      }
+    }
+  } catch (e) {
+    viewer.style.display = 'block';
+    viewer.textContent = 'Error: ' + e.message;
+  }
+}
+
+// ── Init ─────────────────────────────────────────────────────────
+loadConfig();
+loadInputs();
+</script>
+</body>
+</html>

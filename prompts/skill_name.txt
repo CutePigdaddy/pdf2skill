@@ -1,0 +1,17 @@
+You are an expert at creating concise and technical identifiers for software and AI components. Based on the following book summary and table of contents, suggest a single, short, kebab-case (lowercase with hyphens) name for a "Claude Code Skill".
+
+## Guidelines:
+1. The name should be extremely concise (usually 1-3 words).
+2. It should represent the core subject matter (e.g., 'algorithms', 'digital-logic', 'calculus-2').
+3. Do NOT include words like 'skill', 'book', 'guide', or 'index'.
+4. If it's a specific version or part of a series, you may include it (e.g., 'vjf-2').
+5. Output ONLY the kebab-case name, nothing else.
+
+## Context:
+Book Title: {book_title}
+Overview: {overview}
+
+## Table of Contents Preview:
+{toc}
+
+## Suggested Skill Name:

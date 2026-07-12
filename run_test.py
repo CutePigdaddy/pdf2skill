@@ -16,10 +16,33 @@ def prompt_user(message: str, default: str = None) -> str:
                 return user_input
             print("This field cannot be empty.")
 
+def resolve_input_file(name_input: str, inputs_dir: Path) -> Path | None:
+    """Search for a file in inputs/ by name, with recursive fallback."""
+    # Strip any path components — only the filename is used for searching
+    name_input = Path(name_input).name
+
+    candidate = inputs_dir / name_input
+    if candidate.exists():
+        return candidate
+    matches = list(inputs_dir.rglob(name_input))
+    if len(matches) == 1:
+        return matches[0]
+    if len(matches) > 1:
+        print("Found multiple matches in inputs/:")
+        for i, m in enumerate(matches):
+            print(f"  {i+1}: {m.relative_to(inputs_dir)}")
+        choice = prompt_user("Select which file to use", "1")
+        try:
+            return matches[int(choice) - 1]
+        except (ValueError, IndexError):
+            print(f"Invalid selection, using first match: {matches[0].name}")
+            return matches[0]
+    return None
+
 def setup_environment():
     from dotenv import load_dotenv
     load_dotenv()
-    
+
     print("=" * 60)
     print(" PDF2Skills v2.0 - Interactive Test Runner ".center(60))
     print("=" * 60)
@@ -105,26 +128,32 @@ def setup_environment():
 
     print("\n[6] File Configuration")
     input_mode = prompt_user("Select input mode (1: PDF, 2: Existing Markdown)", "1")
-    
+
+    PROJECT_ROOT = Path(__file__).parent
+    INPUTS_DIR = PROJECT_ROOT / "inputs"
+    OUTPUTS_DIR = PROJECT_ROOT / "outputs"
+
+    if not INPUTS_DIR.exists():
+        print(f"[ERROR] inputs/ directory not found at {INPUTS_DIR}. Please create it and add your files.")
+        sys.exit(1)
+
     if input_mode == "1":
-        default_test_pdf = "../test_data/financial_statement_analysis_test2.pdf" if Path("../test_data/financial_statement_analysis_test2.pdf").exists() else ""
-        pdf_path_input = prompt_user("Enter the path to the PDF file", default_test_pdf)
-        pdf_path = Path(pdf_path_input)
-        if not pdf_path.exists():
-            print(f"[ERROR] The file {pdf_path.absolute()} does not exist. Exiting.")
+        file_name = prompt_user("Enter the PDF file name (searches inputs/ folder)")
+        input_file = resolve_input_file(file_name, INPUTS_DIR)
+        if input_file is None:
+            print(f"[ERROR] '{file_name}' not found in inputs/ directory. Exiting.")
             sys.exit(1)
-        input_file = pdf_path
         mode = "pdf"
     else:
-        md_path_input = prompt_user("Enter the path to the existing Markdown file")
-        md_path = Path(md_path_input)
-        if not md_path.exists():
-            print(f"[ERROR] The file {md_path.absolute()} does not exist. Exiting.")
+        file_name = prompt_user("Enter the Markdown file name (searches inputs/ folder)")
+        input_file = resolve_input_file(file_name, INPUTS_DIR)
+        if input_file is None:
+            print(f"[ERROR] '{file_name}' not found in inputs/ directory. Exiting.")
             sys.exit(1)
-        input_file = md_path
         mode = "markdown"
 
-    output_dir = prompt_user("Enter the output directory", "test_outputs")
+    default_output = str(OUTPUTS_DIR / input_file.stem)
+    output_dir = prompt_user("Enter the output directory", default_output)
 
     # Final Confirmation
     print("\n" + "=" * 60)

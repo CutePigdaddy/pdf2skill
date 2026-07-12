@@ -21,12 +21,18 @@ llm:
       chunking_model: gpt-5.4
       peeling_model: gpt-5.4-mini
       skill_engine_model: gpt-5.4-nano
+    nova:
+      base_url: http://token.njunova.com:8317/v1
+      api_key_env: NOVA_API_KEY
+      chunking_model: Kimi-K2.5
+      peeling_model: MiniMax-M2.5
+      skill_engine_model: MiniMax-M2.5
   routers:
-    chunking_provider: siliconflow
-    peeling_provider: siliconflow
-    skill_engine_provider: siliconflow
+    chunking_provider: nova
+    peeling_provider: nova
+    skill_engine_provider: nova
 mineru:
-  api_mode: remote
+  api_mode: local
   language: ch
   local:
     base_url: http://localhost:7860
@@ -43,3 +49,4 @@ pdf:
   chunk_merge_threshold: 5000
   chunk_min_threshold: 1000
   page_limit: 200
+  request_interval: 1

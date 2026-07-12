@@ -38,7 +38,11 @@ def run_pipeline(pdf_path: str, output_dir: str):
         chunker = LLMChunker()
         split_data = chunker.split(md_file)
         base_chunks = chunker.extract_chunks(split_data)
-        checkpoint.mark_stage_completed("llm_chunking", {"base_chunks": base_chunks})
+        is_fallback = split_data.get("fallback", False)
+        if is_fallback:
+            logger.warning("Stage 2 used fallback (LLM failed). Checkpoint NOT saved — will retry on next run.")
+        else:
+            checkpoint.mark_stage_completed("llm_chunking", {"base_chunks": base_chunks})
     else:
         base_chunks = checkpoint.get_stage_data("llm_chunking")["base_chunks"]
         logger.info(f"Loaded {len(base_chunks)} base chunks from checkpoint")
@@ -56,7 +60,13 @@ def run_pipeline(pdf_path: str, output_dir: str):
         peeled_chunks_dir = out_dir / "full_chunks"
         merger.save_results(peeled_chunks_dir, master_root)
         logger.info(f"Peeled chunks saved to: {peeled_chunks_dir}")
-        checkpoint.mark_stage_completed("tree_merging", {"master_root": master_root.to_dict()})
+        if merger.peel_errors > 0:
+            logger.warning(
+                f"Stage 3 had {merger.peel_errors} LLM error(s) during peeling. "
+                "Checkpoint NOT saved — will retry on next run."
+            )
+        else:
+            checkpoint.mark_stage_completed("tree_merging", {"master_root": master_root.to_dict()})
     else:
         logger.info("Loading merged tree from checkpoint...")
         tree_data = checkpoint.get_stage_data("tree_merging")["master_root"]

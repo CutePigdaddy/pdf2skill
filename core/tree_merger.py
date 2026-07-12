@@ -51,7 +51,7 @@ class ChunkNode:
 class TreeMerger:
     """
     Handles Stage 3: TOC Drilling & Merging.
-    Recursively "peels" large chunks into smaller logical sub-chunks by identifying 
+    Recursively "peels" large chunks into smaller logical sub-chunks by identifying
     sub-headers using an LLM, until all chunks are within the token limit.
     """
     def __init__(self):
@@ -62,6 +62,7 @@ class TreeMerger:
         self.chars_per_token = 2
         self.llm = LLMClient(stage="peeling")
         self.chunk_counter = 0
+        self.peel_errors = 0  # Track LLM failures during peeling
 
     def _generate_chunk_id(self) -> str:
         self.chunk_counter += 1
@@ -206,6 +207,7 @@ Return ONLY the JSON object. No prose."""
             response = self.llm.chat(prompt)
             if not response or not response.strip():
                 logger.warning(f"    Empty response from LLM for {chunk.id}")
+                self.peel_errors += 1
                 return [chunk]
 
             json_match = re.search(r'(\{.*\})', response, re.DOTALL)
@@ -223,6 +225,7 @@ Return ONLY the JSON object. No prose."""
 
         except (json.JSONDecodeError, LLMParsingError, requests.RequestException) as e:
             logger.warning(f"    Could not parse LLM response: {e}")
+            self.peel_errors += 1
             return [chunk]
 
         if not anchors:
@@ -333,6 +336,7 @@ Return ONLY the JSON object. No prose."""
         return final_chunks
 
     def build_and_merge(self, llm_chunks: list) -> ChunkNode:
+        self.peel_errors = 0  # Reset error counter for this run
         master_root = ChunkNode(id="master", title="Document", parent_path=[])
         
         for idx, c in enumerate(llm_chunks):

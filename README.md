@@ -62,6 +62,20 @@ python main.py "path/to/your_book.pdf" --output outputs
 
 > 使用 main.py 时，Provider 和模型取 settings.yaml 默认值；如需覆盖请通过 .env 设置环境变量。
 
+**方式 C：Web 可视化界面**
+
+```bash
+python frontend/server.py
+```
+
+启动后浏览器访问 http://localhost:8501 ，可在页面上：
+
+1. **配置** — 每个 stage 独立选择 Provider / Model，在线设置 API Key（自动读取 .env）
+2. **运行** — 下拉选择 inputs/ 中的文件，一键启动 Pipeline，实时查看日志
+3. **输出** — 浏览 outputs/ 目录树，点击文件预览内容
+
+> 将待处理的 PDF 放入 `inputs/` 目录，运行结果自动输出到 `outputs/`。
+
 
 ## 首次运行引导
 
@@ -316,8 +330,11 @@ main.py            # 命令行入口
 run_test.py          # 交互式测试入口
 config/              # settings.yaml + config.py（单例，双层配置合并）
 core/                # pdf_processor / llm_chunker / tree_merger / skill_engine / onboarding
+frontend/            # Web 可视化界面（FastAPI 后端 + SPA 前端）
 utils/               # logger / llm_client / retry_client / checkpoint
 prompts/             # 各阶段 LLM 提示词模板
+inputs/              # 待处理的 PDF/Markdown 文件（放入此目录）
+outputs/             # Pipeline 运行结果
 ```
 
 ## 许可证

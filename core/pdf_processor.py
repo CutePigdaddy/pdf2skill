@@ -141,7 +141,9 @@ class RemoteMinerUProcessor:
                 target_img_dir.mkdir(parents=True, exist_ok=True)
                 for img in img_dir.glob("*"):
                     if img.is_file():
-                        shutil.copy2(img, target_img_dir / img.name)
+                        dst = target_img_dir / img.name
+                        if img.resolve() != dst.resolve():
+                            shutil.copy2(img, dst)
                         
             return md_file.read_text(encoding="utf-8") # Usually auto folder has the md
 
@@ -239,7 +241,7 @@ class LocalMinerUProcessor:
         try:
             result = client.predict(
                 file_path=self.handle_file(str(pdf_path)),
-                end_pages=10000,
+                end_pages=1000,
                 is_ocr=False,
                 formula_enable=self.formula_enable,
                 table_enable=self.table_enable,
@@ -278,7 +280,9 @@ class LocalMinerUProcessor:
                 target_img_dir.mkdir(parents=True, exist_ok=True)
                 for img in img_dir.glob("*"):
                     if img.is_file():
-                        shutil.copy2(img, target_img_dir / img.name)
+                        dst = target_img_dir / img.name
+                        if img.resolve() != dst.resolve():
+                            shutil.copy2(img, dst)
 
             md_text = md_file.read_text(encoding="utf-8")
             

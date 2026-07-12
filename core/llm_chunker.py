@@ -56,6 +56,7 @@ class LLMChunker:
             
         logger.info("Requesting strategic split points from LLM...")
         split_plan = None
+        used_fallback = False
         for attempt in range(2):
             try:
                 response = self.llm.chat(prompt, is_json=True)
@@ -69,14 +70,16 @@ class LLMChunker:
             num_chunks = max(1, total // 2000)
             step = total // num_chunks
             split_plan = {"chapter_splits": [i * step for i in range(1, num_chunks)]}
-        
+            used_fallback = True
+
         return {
             "splits": split_plan.get("chapter_splits", []),
             "toc_range": split_plan.get("toc_range"),
             "preface_range": split_plan.get("preface_range"),
             "atomic_ranges": split_plan.get("atomic_ranges", {}),
             "headers": headers,
-            "lines": lines
+            "lines": lines,
+            "fallback": used_fallback
         }
 
     def _build_tree_text(self, headers: list[Header]) -> str:

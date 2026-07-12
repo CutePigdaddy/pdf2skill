@@ -16,15 +16,21 @@ logs/
 outputs/
 scan-output/
 test_outputs/
+inputs/
 EY/
 
 .DS_Store
 Thumbs.db
+
 # Generated Document Folders
 CS/
 vjf/
 vj/
 DLCO/
+condensed-matter-physics/
+
+# Docs with large binaries
+docs/pdfs/
 
 # Local environment and outputs
 *.pdf
@@ -37,3 +43,5 @@ status.txt
 still_tracked.txt
 tracked_files.txt
 
+# Frontend runtime artifacts
+frontend/screenshot_*.png
