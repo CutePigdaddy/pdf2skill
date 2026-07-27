@@ -1,3 +1,4 @@
+# ── Python ──────────────────────────────────────────────────────────
 __pycache__/
 *.pyc
 *.pyo
@@ -5,43 +6,65 @@ __pycache__/
 .pytest_cache/
 .mypy_cache/
 .ruff_cache/
+*.egg-info/
+build/
+dist/
+
+# ── Virtual environments ───────────────────────────────────────────
 .venv/
 venv/
 env/
-build/
-dist/
-*.egg-info/
 
+# ── Environment & secrets ─────────────────────────────────────────
+.env
+.env.*
+
+# ── Runtime outputs ───────────────────────────────────────────────
 logs/
 outputs/
+inputs/
 scan-output/
 test_outputs/
-inputs/
-EY/
+tests/logs/
 
+# ── OS files ──────────────────────────────────────────────────────
 .DS_Store
 Thumbs.db
+desktop.ini
 
-# Generated Document Folders
+# ── Generated document folders (user-specific) ────────────────────
 CS/
 vjf/
 vj/
 DLCO/
 condensed-matter-physics/
+EY/
 
-# Docs with large binaries
+# ── Docs with large binaries ──────────────────────────────────────
 docs/pdfs/
 
-# Local environment and outputs
+# ── Ad-hoc scripts (not part of core project) ─────────────────────
+debug_chunks.py
+fix_skill.py
+test_gradio_mineru.py
+test_llm_api.py
+extract_md.py
+
+# ── Misc generated files ──────────────────────────────────────────
 *.pdf
 repo-scan-data.md
 repo-scan-report.md
 report.html
 vjf.md
-.env
 status.txt
 still_tracked.txt
 tracked_files.txt
 
-# Frontend runtime artifacts
+# ── Reference docs (external, not project source) ─────────────────
+MinerU-*.md
+
+# ── Frontend runtime artifacts ────────────────────────────────────
 frontend/screenshot_*.png
+
+# ── Claude Code session files ─────────────────────────────────────
+.claude/
