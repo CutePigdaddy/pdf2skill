@@ -4,150 +4,761 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>PDF2Skill</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@400;500&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400&display=swap" rel="stylesheet">
 <style>
-  :root { --bg: #0f1117; --card: #1a1d27; --border: #2a2d3a; --text: #e0e0e0; --dim: #888; --accent: #6c8cff; --green: #4ade80; --red: #f87171; --yellow: #fbbf24; }
-  * { margin: 0; padding: 0; box-sizing: border-box; }
-  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: var(--bg); color: var(--text); min-height: 100vh; }
-  .header { padding: 16px 24px; border-bottom: 1px solid var(--border); display: flex; align-items: center; gap: 12px; }
-  .header h1 { font-size: 18px; font-weight: 600; }
-  .header .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--green); }
-  .tabs { display: flex; gap: 0; border-bottom: 1px solid var(--border); }
-  .tab { padding: 10px 20px; cursor: pointer; color: var(--dim); font-size: 14px; border-bottom: 2px solid transparent; transition: all .15s; }
-  .tab:hover { color: var(--text); }
-  .tab.active { color: var(--accent); border-bottom-color: var(--accent); }
-  .panel { display: none; padding: 20px 24px; max-width: 960px; }
-  .panel.active { display: block; }
-  label { display: block; font-size: 13px; color: var(--dim); margin: 12px 0 4px; }
-  select, input[type="text"], input[type="number"], input[type="password"] {
-    width: 100%; max-width: 400px; padding: 8px 10px; background: var(--bg); border: 1px solid var(--border);
-    border-radius: 6px; color: var(--text); font-size: 14px; outline: none;
-  }
-  select:focus, input:focus { border-color: var(--accent); }
-  .row { display: flex; gap: 16px; flex-wrap: wrap; }
-  .row > div { flex: 1; min-width: 200px; }
-  .btn { padding: 8px 20px; border: none; border-radius: 6px; cursor: pointer; font-size: 14px; font-weight: 500; transition: all .15s; }
-  .btn-primary { background: var(--accent); color: #fff; }
-  .btn-primary:hover { filter: brightness(1.15); }
-  .btn-primary:disabled { opacity: .5; cursor: not-allowed; }
-  .btn-danger { background: var(--red); color: #fff; }
-  .btn-danger:hover { filter: brightness(1.15); }
-  .btn-sm { padding: 4px 12px; font-size: 12px; }
-  .status { display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 12px; font-weight: 600; }
-  .status-running { background: #1e3a5f; color: var(--accent); }
-  .status-done { background: #1a3a2a; color: var(--green); }
-  .status-failed { background: #3a1a1a; color: var(--red); }
-  .log-box { background: #000; border: 1px solid var(--border); border-radius: 6px; padding: 12px;
-    font-family: 'Cascadia Code', 'Fira Code', monospace; font-size: 12px; line-height: 1.5;
-    max-height: 500px; overflow-y: auto; white-space: pre-wrap; word-break: break-all; color: #ccc; }
-  .tree { font-size: 13px; line-height: 1.8; }
-  .tree-item { cursor: pointer; padding: 2px 6px; border-radius: 4px; }
-  .tree-item:hover { background: var(--border); }
-  .tree-dir::before { content: '📁 '; }
-  .tree-file::before { content: '📄 '; }
-  .tree-children { padding-left: 20px; }
-  .file-viewer { background: var(--card); border: 1px solid var(--border); border-radius: 6px; padding: 16px;
-    font-family: 'Cascadia Code', monospace; font-size: 13px; white-space: pre-wrap; word-break: break-all;
-    max-height: 500px; overflow-y: auto; margin-top: 12px; display: none; }
-  .key-row { display: flex; align-items: center; gap: 8px; margin: 6px 0; }
-  .key-row input { max-width: 300px; }
-  .key-badge { font-size: 11px; padding: 2px 6px; border-radius: 4px; }
-  .key-set { background: #1a3a2a; color: var(--green); }
-  .key-missing { background: #3a1a1a; color: var(--red); }
-  .saved-toast { position: fixed; bottom: 24px; right: 24px; background: var(--green); color: #000;
-    padding: 8px 16px; border-radius: 6px; font-size: 14px; font-weight: 600; opacity: 0; transition: opacity .3s; }
-  .saved-toast.show { opacity: 1; }
+/* ── Design tokens ────────────────────────────────────────────── */
+:root {
+  --primary: #cc785c;
+  --primary-active: #a9583e;
+  --primary-disabled: #e6dfd8;
+  --ink: #141413;
+  --body: #3d3d3a;
+  --body-strong: #252523;
+  --muted: #6c6a64;
+  --muted-soft: #8e8b82;
+  --hairline: #e6dfd8;
+  --hairline-soft: #ebe6df;
+  --canvas: #faf9f5;
+  --surface-soft: #f5f0e8;
+  --surface-card: #efe9de;
+  --surface-cream-strong: #e8e0d2;
+  --surface-dark: #181715;
+  --surface-dark-elevated: #252320;
+  --surface-dark-soft: #1f1e1b;
+  --on-primary: #ffffff;
+  --on-dark: #faf9f5;
+  --on-dark-soft: #a09d96;
+  --accent-teal: #5db8a6;
+  --accent-amber: #e8a55a;
+  --success: #5db872;
+  --warning: #d4a017;
+  --error: #c64545;
+  --radius-md: 8px;
+  --radius-lg: 12px;
+  --radius-xl: 16px;
+  --radius-pill: 9999px;
+  --font-display: 'Cormorant Garamond', 'Tiempos Headline', Georgia, serif;
+  --font-body: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  --font-code: 'JetBrains Mono', ui-monospace, monospace;
+}
+
+/* ── Reset & base ─────────────────────────────────────────────── */
+*, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+body {
+  font-family: var(--font-body);
+  background: var(--canvas);
+  color: var(--body);
+  font-size: 16px;
+  line-height: 1.55;
+  min-height: 100vh;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* ── Top nav ──────────────────────────────────────────────────── */
+.top-nav {
+  background: var(--canvas);
+  border-bottom: 1px solid var(--hairline);
+  height: 64px;
+  display: flex;
+  align-items: center;
+  padding: 0 32px;
+  position: sticky;
+  top: 0;
+  z-index: 50;
+}
+.top-nav .wordmark {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.top-nav .spike::before {
+  content: '✱';
+  font-size: 18px;
+  color: var(--ink);
+  line-height: 1;
+}
+.top-nav .brand {
+  font-family: var(--font-display);
+  font-size: 22px;
+  font-weight: 500;
+  letter-spacing: -0.3px;
+  color: var(--ink);
+}
+
+/* ── Tabs ─────────────────────────────────────────────────────── */
+.tabs {
+  display: flex;
+  gap: 0;
+  border-bottom: 1px solid var(--hairline);
+  padding: 0 32px;
+  background: var(--canvas);
+}
+.tab {
+  padding: 12px 20px;
+  cursor: pointer;
+  color: var(--muted);
+  font-size: 14px;
+  font-weight: 500;
+  border-bottom: 2px solid transparent;
+  transition: color .15s, border-color .15s;
+  user-select: none;
+}
+.tab:hover { color: var(--ink); }
+.tab.active {
+  color: var(--primary);
+  border-bottom-color: var(--primary);
+}
+
+/* ── Panels ───────────────────────────────────────────────────── */
+.panel {
+  display: none;
+  padding: 40px 32px 96px;
+  max-width: 960px;
+}
+.panel.active { display: block; }
+
+/* ── Headings ─────────────────────────────────────────────────── */
+.panel h2 {
+  font-family: var(--font-display);
+  font-size: 28px;
+  font-weight: 400;
+  letter-spacing: -0.3px;
+  line-height: 1.2;
+  color: var(--ink);
+  margin-bottom: 8px;
+}
+.panel h3 {
+  font-family: var(--font-body);
+  font-size: 18px;
+  font-weight: 500;
+  line-height: 1.4;
+  color: var(--ink);
+  margin-bottom: 8px;
+}
+.panel .subtitle {
+  font-size: 16px;
+  color: var(--muted);
+  margin-bottom: 32px;
+  line-height: 1.55;
+}
+
+/* ── Form elements ────────────────────────────────────────────── */
+label {
+  display: block;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--muted);
+  margin: 16px 0 6px;
+}
+select,
+input[type="text"],
+input[type="number"],
+input[type="password"] {
+  width: 100%;
+  max-width: 400px;
+  padding: 10px 14px;
+  background: var(--canvas);
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-md);
+  color: var(--ink);
+  font-family: var(--font-body);
+  font-size: 16px;
+  line-height: 1.55;
+  outline: none;
+  height: 40px;
+  transition: border-color .15s, box-shadow .15s;
+}
+select:focus,
+input:focus {
+  border-color: var(--primary);
+  box-shadow: 0 0 0 3px rgba(204, 120, 92, 0.15);
+}
+
+/* ── Grid rows ────────────────────────────────────────────────── */
+.row {
+  display: flex;
+  gap: 24px;
+  flex-wrap: wrap;
+}
+.row > div {
+  flex: 1;
+  min-width: 220px;
+}
+
+/* ── Buttons ──────────────────────────────────────────────────── */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 12px 20px;
+  border: none;
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  font-family: var(--font-body);
+  font-size: 14px;
+  font-weight: 500;
+  line-height: 1;
+  transition: background .15s;
+  height: 40px;
+}
+.btn-primary {
+  background: var(--primary);
+  color: var(--on-primary);
+}
+.btn-primary:active { background: var(--primary-active); }
+.btn-primary:disabled {
+  background: var(--primary-disabled);
+  color: var(--muted);
+  cursor: not-allowed;
+}
+.btn-secondary {
+  background: var(--canvas);
+  color: var(--ink);
+  border: 1px solid var(--hairline);
+}
+.btn-danger {
+  background: var(--error);
+  color: var(--on-primary);
+}
+.btn-danger:active { filter: brightness(0.9); }
+.btn-sm {
+  padding: 6px 14px;
+  font-size: 13px;
+  height: auto;
+}
+
+/* ── Status badges ────────────────────────────────────────────── */
+.status {
+  display: inline-block;
+  padding: 4px 12px;
+  border-radius: var(--radius-pill);
+  font-size: 13px;
+  font-weight: 500;
+}
+.status-running {
+  background: var(--surface-soft);
+  color: var(--primary);
+}
+.status-done {
+  background: #e8f5e9;
+  color: #2e7d32;
+}
+.status-failed {
+  background: #fbe9e7;
+  color: var(--error);
+}
+
+/* ── Log box (code-window-card) ──────────────────────────────── */
+.log-box {
+  background: var(--surface-dark);
+  color: var(--on-dark);
+  border-radius: var(--radius-lg);
+  padding: 24px;
+  font-family: var(--font-code);
+  font-size: 14px;
+  line-height: 1.6;
+  max-height: 500px;
+  overflow-y: auto;
+  white-space: pre-wrap;
+  word-break: break-all;
+  min-height: 160px;
+}
+.log-box::-webkit-scrollbar { width: 6px; }
+.log-box::-webkit-scrollbar-track { background: transparent; }
+.log-box::-webkit-scrollbar-thumb { background: var(--surface-dark-elevated); border-radius: 3px; }
+
+/* ── Output tree ──────────────────────────────────────────────── */
+.tree { font-size: 14px; line-height: 1.8; }
+.tree-item {
+  cursor: pointer;
+  padding: 4px 10px;
+  border-radius: var(--radius-md);
+  transition: background .1s;
+}
+.tree-item:hover { background: var(--surface-soft); }
+.tree-dir::before { content: '📁 '; }
+.tree-file::before { content: '📄 '; }
+.tree-children { padding-left: 24px; }
+
+/* ── File viewer (feature card) ───────────────────────────────── */
+.file-viewer {
+  background: var(--surface-card);
+  border-radius: var(--radius-lg);
+  padding: 24px;
+  font-family: var(--font-code);
+  font-size: 14px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  word-break: break-all;
+  max-height: 500px;
+  overflow-y: auto;
+  margin-top: 16px;
+  display: none;
+  color: var(--ink);
+}
+.file-viewer img { border-radius: var(--radius-md); }
+
+/* ── API key rows ─────────────────────────────────────────────── */
+.key-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 8px 0;
+  flex-wrap: wrap;
+}
+.key-row strong {
+  min-width: 100px;
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--ink);
+}
+.key-row input { max-width: 260px; }
+.key-badge {
+  font-size: 12px;
+  font-weight: 500;
+  padding: 3px 10px;
+  border-radius: var(--radius-pill);
+}
+.key-set {
+  background: #e8f5e9;
+  color: #2e7d32;
+}
+.key-missing {
+  background: #fbe9e7;
+  color: var(--error);
+}
+
+/* ── Cards ────────────────────────────────────────────────────── */
+.card {
+  background: var(--surface-card);
+  border-radius: var(--radius-lg);
+  padding: 32px;
+  margin-bottom: 24px;
+}
+.card-dark {
+  background: var(--surface-dark);
+  color: var(--on-dark);
+  border-radius: var(--radius-lg);
+  padding: 32px;
+  margin-bottom: 24px;
+}
+.card-dark label { color: var(--on-dark-soft); }
+.card-dark select,
+.card-dark input {
+  background: var(--surface-dark-elevated);
+  border-color: var(--surface-dark-soft);
+  color: var(--on-dark);
+}
+.card-dark select:focus,
+.card-dark input:focus {
+  border-color: var(--primary);
+  box-shadow: 0 0 0 3px rgba(204, 120, 92, 0.25);
+}
+
+/* ── Toast ────────────────────────────────────────────────────── */
+.saved-toast {
+  position: fixed;
+  bottom: 32px;
+  right: 32px;
+  background: var(--ink);
+  color: var(--canvas);
+  padding: 12px 24px;
+  border-radius: var(--radius-md);
+  font-size: 14px;
+  font-weight: 500;
+  opacity: 0;
+  transition: opacity .3s;
+  z-index: 100;
+}
+.saved-toast.show { opacity: 1; }
+
+/* ── MinerU progress bar ─────────────────────────────────────── */
+.mineru-progress-card {
+  background: var(--surface-card);
+  border-radius: var(--radius-lg);
+  padding: 20px 24px;
+  margin-bottom: 16px;
+  display: none;
+}
+.mineru-progress-card.active { display: block; }
+.mineru-progress-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 10px;
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--ink);
+}
+.mineru-progress-header .icon { font-size: 16px; }
+.mineru-progress-track {
+  background: var(--hairline);
+  border-radius: var(--radius-pill);
+  height: 8px;
+  overflow: hidden;
+}
+.mineru-progress-fill {
+  background: var(--primary);
+  height: 100%;
+  border-radius: var(--radius-pill);
+  transition: width .4s ease;
+  min-width: 0;
+}
+.mineru-progress-fill.indeterminate {
+  width: 30% !important;
+  animation: mineru-slide 1.5s ease-in-out infinite;
+}
+@keyframes mineru-slide {
+  0% { margin-left: -30%; }
+  100% { margin-left: 100%; }
+}
+.mineru-progress-detail {
+  display: flex;
+  justify-content: space-between;
+  font-size: 12px;
+  color: var(--muted);
+  margin-top: 6px;
+}
+
+/* ── MinerU error card ──────────────────────────────────────── */
+.mineru-error-card {
+  background: #fbe9e7;
+  border: 1px solid #f5c6c6;
+  border-radius: var(--radius-lg);
+  padding: 20px 24px;
+  margin-bottom: 16px;
+  display: none;
+}
+.mineru-error-card.active { display: block; }
+.mineru-error-title {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--error);
+  margin-bottom: 8px;
+}
+.mineru-error-code {
+  font-size: 13px;
+  color: var(--body);
+  margin-bottom: 6px;
+}
+.mineru-error-advice {
+  font-size: 14px;
+  color: var(--body-strong);
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid #f5c6c6;
+}
+.mineru-error-advice::before {
+  content: '💡 ';
+}
+
+/* ── MinerU config toggle section ───────────────────────────── */
+.mineru-sub {
+  display: none;
+}
+.mineru-sub.active {
+  display: block;
+}
+.toggle-row {
+  display: flex;
+  gap: 8px;
+}
+.toggle-btn {
+  padding: 6px 16px;
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-pill);
+  background: var(--canvas);
+  color: var(--muted);
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 500;
+  transition: all .15s;
+}
+.toggle-btn.active {
+  background: var(--primary);
+  color: var(--on-primary);
+  border-color: var(--primary);
+}
+
+/* ── Responsive ──────────────────────────────────────────────── */
+@media (max-width: 768px) {
+  .top-nav { padding: 0 16px; }
+  .tabs { padding: 0 16px; }
+  .panel { padding: 24px 16px 64px; }
+  .panel h2 { font-size: 24px; }
+  .row { flex-direction: column; gap: 16px; }
+}
 </style>
 </head>
 <body>
 
-<div class="header">
-  <div class="dot"></div>
-  <h1>PDF2Skill</h1>
-</div>
+<!-- ── Top Navigation ────────────────────────────────────────────── -->
+<nav class="top-nav">
+  <div class="wordmark">
+    <span class="spike"></span>
+    <span class="brand">PDF2Skill</span>
+  </div>
+</nav>
 
+<!-- ── Tabs ──────────────────────────────────────────────────────── -->
 <div class="tabs">
-  <div class="tab active" data-tab="config">⚙ 配置</div>
-  <div class="tab" data-tab="run">▶ 运行</div>
-  <div class="tab" data-tab="outputs">📂 输出</div>
+  <div class="tab active" data-tab="config">配置</div>
+  <div class="tab" data-tab="run">运行</div>
+  <div class="tab" data-tab="outputs">输出</div>
 </div>
 
 <!-- ═══ Config Panel ═══ -->
 <div class="panel active" id="panel-config">
-  <h3 style="margin-bottom:8px">Provider 配置</h3>
-  <p style="font-size:13px;color:var(--dim);margin-bottom:12px">每个阶段可独立选择 Provider 和模型。修改后点击保存。</p>
+  <h2>Provider 配置</h2>
+  <p class="subtitle">每个阶段可独立选择 Provider 和模型。修改后点击保存。</p>
 
-  <div class="row">
-    <div>
-      <label>Chunking Provider</label>
-      <select id="chunk-provider"></select>
-      <label>Chunking Model</label>
-      <input type="text" id="chunk-model">
+  <div class="card">
+    <div class="row">
+      <div>
+        <label>Chunking Provider</label>
+        <select id="chunk-provider"></select>
+        <label>Chunking Model</label>
+        <input type="text" id="chunk-model">
+      </div>
+      <div>
+        <label>Peeling Provider</label>
+        <select id="peel-provider"></select>
+        <label>Peeling Model</label>
+        <input type="text" id="peel-model">
+      </div>
+      <div>
+        <label>Skill Engine Provider</label>
+        <select id="skill-provider"></select>
+        <label>Skill Engine Model</label>
+        <input type="text" id="skill-model">
+      </div>
     </div>
-    <div>
-      <label>Peeling Provider</label>
-      <select id="peel-provider"></select>
-      <label>Peeling Model</label>
-      <input type="text" id="peel-model">
+
+    <label>Request Interval (秒)</label>
+    <input type="number" id="request-interval" style="max-width:140px" step="0.5" min="0">
+  </div>
+
+  <h3 style="margin-bottom:12px">API Keys</h3>
+  <div class="card" id="apikey-section"></div>
+
+  <!-- ── MinerU Config Card ────────────────────────────────────── -->
+  <h2 style="margin-top:32px">MinerU 文档解析</h2>
+  <p class="subtitle">配置 MinerU 文档解析服务。本地模式需要运行 MinerU 进程；远程模式使用云端 API。</p>
+
+  <div class="card">
+    <label>API 模式</label>
+    <div class="toggle-row" style="margin-bottom:16px">
+      <button class="toggle-btn active" id="mode-local" onclick="setMinerUMode('local')">本地模式</button>
+      <button class="toggle-btn" id="mode-remote" onclick="setMinerUMode('remote')">远程模式</button>
     </div>
-    <div>
-      <label>Skill Engine Provider</label>
-      <select id="skill-provider"></select>
-      <label>Skill Engine Model</label>
-      <input type="text" id="skill-model">
+
+    <!-- Local config -->
+    <div class="mineru-sub active" id="mineru-local">
+      <div class="row">
+        <div>
+          <label>服务地址</label>
+          <input type="text" id="mu-local-url" placeholder="http://localhost:7860">
+        </div>
+        <div>
+          <label>解析引擎</label>
+          <select id="mu-local-backend">
+            <option value="vlm-auto-engine">VLM Auto</option>
+            <option value="hybrid-auto-engine">Hybrid Auto</option>
+            <option value="pipeline-auto-engine">Pipeline Auto</option>
+          </select>
+        </div>
+      </div>
+      <div class="row">
+        <div>
+          <label>解析方法</label>
+          <select id="mu-local-parse">
+            <option value="auto">自动</option>
+            <option value="ocr">OCR</option>
+            <option value="txt">文本</option>
+          </select>
+        </div>
+        <div>
+          <label>语言</label>
+          <select id="mu-language">
+            <option value="ch">中文</option>
+            <option value="en">英文</option>
+            <option value="korean">韩文</option>
+            <option value="japan">日文</option>
+            <option value="chinese_cht">繁体中文</option>
+          </select>
+        </div>
+      </div>
+      <div class="row" style="margin-top:12px">
+        <div>
+          <label style="display:inline-flex;align-items:center;gap:6px;cursor:pointer">
+            <input type="checkbox" id="mu-local-formula" checked> 识别公式
+          </label>
+        </div>
+        <div>
+          <label style="display:inline-flex;align-items:center;gap:6px;cursor:pointer">
+            <input type="checkbox" id="mu-local-table" checked> 识别表格
+          </label>
+        </div>
+      </div>
+    </div>
+
+    <!-- Remote config -->
+    <div class="mineru-sub" id="mineru-remote">
+      <div class="key-row" style="margin-bottom:16px">
+        <strong>API Key</strong>
+        <span class="key-badge key-missing" id="mu-key-badge">✗ 未设置</span>
+        <input type="password" id="mu-api-key" placeholder="MINERU_API_KEY" style="max-width:260px">
+        <button class="btn btn-sm btn-primary" onclick="setKey('MINERU_API_KEY','mu-api-key')">设置</button>
+      </div>
+      <div class="row">
+        <div>
+          <label>模型版本</label>
+          <select id="mu-remote-model">
+            <option value="vlm">VLM（推荐）</option>
+            <option value="pipeline">Pipeline</option>
+            <option value="MinerU-HTML">MinerU-HTML</option>
+          </select>
+        </div>
+        <div>
+          <label>上传方式</label>
+          <select id="mu-remote-upload">
+            <option value="file">签名上传（本地文件）</option>
+            <option value="url">URL 提交（公网链接）</option>
+          </select>
+        </div>
+      </div>
+      <div class="row">
+        <div>
+          <label>页码范围（可选）</label>
+          <input type="text" id="mu-remote-pages" placeholder="如 1-10,15-20">
+        </div>
+        <div>
+          <label>语言</label>
+          <select id="mu-language-remote">
+            <option value="ch">中文</option>
+            <option value="en">英文</option>
+            <option value="korean">韩文</option>
+            <option value="japan">日文</option>
+            <option value="chinese_cht">繁体中文</option>
+          </select>
+        </div>
+      </div>
+      <div class="row" style="margin-top:12px">
+        <div>
+          <label style="display:inline-flex;align-items:center;gap:6px;cursor:pointer">
+            <input type="checkbox" id="mu-remote-ocr"> 启用 OCR
+          </label>
+        </div>
+        <div>
+          <label style="display:inline-flex;align-items:center;gap:6px;cursor:pointer">
+            <input type="checkbox" id="mu-remote-formula" checked> 识别公式
+          </label>
+        </div>
+        <div>
+          <label style="display:inline-flex;align-items:center;gap:6px;cursor:pointer">
+            <input type="checkbox" id="mu-remote-table" checked> 识别表格
+          </label>
+        </div>
+      </div>
+      <div class="row" style="margin-top:12px">
+        <div>
+          <label>额外输出格式（可选）</label>
+          <div style="display:flex;gap:12px;margin-top:4px">
+            <label style="display:inline-flex;align-items:center;gap:4px;cursor:pointer">
+              <input type="checkbox" id="mu-extra-docx" value="docx"> DOCX
+            </label>
+            <label style="display:inline-flex;align-items:center;gap:4px;cursor:pointer">
+              <input type="checkbox" id="mu-extra-html" value="html"> HTML
+            </label>
+            <label style="display:inline-flex;align-items:center;gap:4px;cursor:pointer">
+              <input type="checkbox" id="mu-extra-latex" value="latex"> LaTeX
+            </label>
+          </div>
+        </div>
+      </div>
     </div>
   </div>
 
-  <label>Request Interval (秒)</label>
-  <input type="number" id="request-interval" style="max-width:120px" step="0.5" min="0">
-
-  <h3 style="margin:20px 0 8px">API Keys</h3>
-  <div id="apikey-section"></div>
-
-  <div style="margin-top:20px">
-    <button class="btn btn-primary" onclick="saveConfig()">💾 保存配置</button>
+  <div style="margin-top:24px">
+    <button class="btn btn-primary" onclick="saveConfig()">保存配置</button>
   </div>
 </div>
 
 <!-- ═══ Run Panel ═══ -->
 <div class="panel" id="panel-run">
-  <div class="row">
-    <div>
-      <label>输入文件 (inputs/)</label>
-      <select id="input-file"></select>
+  <h2>运行 Pipeline</h2>
+  <p class="subtitle">选择输入文件并启动处理流程。</p>
+
+  <div class="card">
+    <div class="row">
+      <div>
+        <label>输入文件 (inputs/)</label>
+        <select id="input-file"></select>
+      </div>
+      <div>
+        <label>输入模式</label>
+        <select id="input-mode">
+          <option value="pdf">PDF</option>
+          <option value="markdown">Markdown</option>
+        </select>
+      </div>
+      <div>
+        <label>输出目录</label>
+        <input type="text" id="output-dir" placeholder="自动生成">
+      </div>
     </div>
-    <div>
-      <label>输入模式</label>
-      <select id="input-mode">
-        <option value="pdf">PDF</option>
-        <option value="markdown">Markdown</option>
-      </select>
-    </div>
-    <div>
-      <label>输出目录</label>
-      <input type="text" id="output-dir" placeholder="自动生成">
+
+    <div style="margin-top:24px;display:flex;gap:10px;align-items:center">
+      <button class="btn btn-primary" id="btn-start" onclick="startPipeline()">开始运行</button>
+      <button class="btn btn-danger" id="btn-stop" onclick="stopPipeline()" style="display:none">停止</button>
+      <span id="run-status"></span>
     </div>
   </div>
 
-  <div style="margin-top:16px;display:flex;gap:8px;align-items:center">
-    <button class="btn btn-primary" id="btn-start" onclick="startPipeline()">🚀 开始运行</button>
-    <button class="btn btn-danger" id="btn-stop" onclick="stopPipeline()" style="display:none">⏹ 停止</button>
-    <span id="run-status"></span>
+  <!-- ── MinerU Progress Card ──────────────────────────────────── -->
+  <div class="mineru-progress-card" id="mineru-progress">
+    <div class="mineru-progress-header">
+      <span class="icon">📄</span>
+      <span id="mineru-progress-label">MinerU 解析</span>
+    </div>
+    <div class="mineru-progress-track">
+      <div class="mineru-progress-fill indeterminate" id="mineru-progress-fill" style="width:0%"></div>
+    </div>
+    <div class="mineru-progress-detail">
+      <span id="mineru-progress-pages"></span>
+      <span id="mineru-progress-pct"></span>
+    </div>
   </div>
 
-  <h3 style="margin:16px 0 8px">运行日志</h3>
+  <!-- ── MinerU Error Card ─────────────────────────────────────── -->
+  <div class="mineru-error-card" id="mineru-error">
+    <div class="mineru-error-title">⚠ MinerU 解析错误</div>
+    <div class="mineru-error-code" id="mineru-error-code"></div>
+    <div class="mineru-error-advice" id="mineru-error-advice"></div>
+  </div>
+
+  <h3 style="margin-bottom:12px">运行日志</h3>
   <div class="log-box" id="log-box">等待运行...</div>
 </div>
 
 <!-- ═══ Outputs Panel ═══ -->
 <div class="panel" id="panel-outputs">
-  <div style="display:flex;gap:8px;align-items:center;margin-bottom:12px">
-    <button class="btn btn-sm btn-primary" onclick="loadOutputs()">🔄 刷新</button>
-    <span style="font-size:13px;color:var(--dim)">点击文件名预览内容</span>
+  <h2>输出浏览</h2>
+  <p class="subtitle">浏览 outputs/ 目录，点击文件名预览内容。</p>
+
+  <div style="margin-bottom:16px">
+    <button class="btn btn-secondary btn-sm" onclick="loadOutputs()">刷新</button>
   </div>
-  <div class="tree" id="output-tree"></div>
+
+  <div class="card">
+    <div class="tree" id="output-tree"></div>
+  </div>
   <div class="file-viewer" id="file-viewer"></div>
 </div>
 
+<!-- ── Toast ────────────────────────────────────────────────────── -->
 <div class="saved-toast" id="toast">已保存</div>
 
 <script>
@@ -156,6 +767,7 @@ let configData = null;
 let providerNames = [];
 let currentJobId = null;
 let logPollTimer = null;
+let mineruMode = 'local';
 
 // ── Tab switching ────────────────────────────────────────────────
 document.querySelectorAll('.tab').forEach(tab => {
@@ -200,6 +812,44 @@ async function loadConfig() {
 
   document.getElementById('request-interval').value = configData.llm?.request_interval ?? 1.0;
 
+  // MinerU config
+  const mu = configData.mineru || {};
+  mineruMode = mu.api_mode || 'local';
+  setMinerUMode(mineruMode);
+  document.getElementById('mu-local-url').value = mu.local?.base_url || 'http://localhost:7860';
+  document.getElementById('mu-local-backend').value = mu.local?.backend || 'vlm-auto-engine';
+  document.getElementById('mu-local-parse').value = mu.local?.parse_method || 'auto';
+  document.getElementById('mu-local-formula').checked = mu.local?.formula_enable !== false;
+  document.getElementById('mu-local-table').checked = mu.local?.table_enable !== false;
+  document.getElementById('mu-remote-model').value = mu.remote?.model_version || 'vlm';
+  document.getElementById('mu-remote-upload').value = mu.remote?.upload_mode || 'file';
+  document.getElementById('mu-remote-pages').value = mu.remote?.page_ranges || '';
+  document.getElementById('mu-remote-ocr').checked = mu.remote?.is_ocr === true;
+  document.getElementById('mu-remote-formula').checked = mu.remote?.enable_formula !== false;
+  document.getElementById('mu-remote-table').checked = mu.remote?.enable_table !== false;
+
+  // Language selectors (shared key in mineru section)
+  const muLang = mu.language || 'ch';
+  document.getElementById('mu-language').value = muLang;
+  document.getElementById('mu-language-remote').value = muLang;
+
+  // Extra formats
+  const extraFmts = mu.remote?.extra_formats || [];
+  document.getElementById('mu-extra-docx').checked = extraFmts.includes('docx');
+  document.getElementById('mu-extra-html').checked = extraFmts.includes('html');
+  document.getElementById('mu-extra-latex').checked = extraFmts.includes('latex');
+
+  // MinerU API key badge
+  const muKeyStatus = data.mineru_key_status || {};
+  const muKeyBadge = document.getElementById('mu-key-badge');
+  if (muKeyStatus.api_key_set) {
+    muKeyBadge.className = 'key-badge key-set';
+    muKeyBadge.textContent = '✓ ' + (muKeyStatus.api_key_preview || '****');
+  } else {
+    muKeyBadge.className = 'key-badge key-missing';
+    muKeyBadge.textContent = '✗ 未设置';
+  }
+
   // API keys
   const section = document.getElementById('apikey-section');
   section.innerHTML = '';
@@ -210,7 +860,7 @@ async function loadConfig() {
     const preview = info.api_key_preview || '';
     section.innerHTML += `
       <div class="key-row">
-        <strong style="min-width:100px">${name}</strong>
+        <strong>${name}</strong>
         <span class="key-badge ${set ? 'key-set' : 'key-missing'}">${set ? '✓ ' + preview : '✗ 未设置'}</span>
         <input type="password" id="key-${name}" placeholder="输入 ${envVar}" style="max-width:260px">
         <button class="btn btn-sm btn-primary" onclick="setKey('${envVar}','key-${name}')">设置</button>
@@ -235,9 +885,35 @@ async function saveConfig() {
     providers[s.provider][s.modelKey] = s.modelVal;
   });
 
+  const extraFormats = [];
+  if (document.getElementById('mu-extra-docx').checked) extraFormats.push('docx');
+  if (document.getElementById('mu-extra-html').checked) extraFormats.push('html');
+  if (document.getElementById('mu-extra-latex').checked) extraFormats.push('latex');
+
+  const mineru = {
+    api_mode: mineruMode,
+    language: mineruMode === 'local' ? document.getElementById('mu-language').value : document.getElementById('mu-language-remote').value,
+    local: {
+      base_url: document.getElementById('mu-local-url').value,
+      backend: document.getElementById('mu-local-backend').value,
+      parse_method: document.getElementById('mu-local-parse').value,
+      formula_enable: document.getElementById('mu-local-formula').checked,
+      table_enable: document.getElementById('mu-local-table').checked,
+    },
+    remote: {
+      model_version: document.getElementById('mu-remote-model').value,
+      upload_mode: document.getElementById('mu-remote-upload').value,
+      page_ranges: document.getElementById('mu-remote-pages').value,
+      is_ocr: document.getElementById('mu-remote-ocr').checked,
+      enable_formula: document.getElementById('mu-remote-formula').checked,
+      enable_table: document.getElementById('mu-remote-table').checked,
+      extra_formats: extraFormats,
+    },
+  };
+
   await api('/api/config', {
     method: 'POST',
-    body: JSON.stringify({ providers, routers, pdf: { request_interval: parseFloat(document.getElementById('request-interval').value) } }),
+    body: JSON.stringify({ providers, routers, pdf: { request_interval: parseFloat(document.getElementById('request-interval').value) }, mineru }),
   });
   showToast('配置已保存');
 }
@@ -299,9 +975,11 @@ async function startPipeline() {
     const res = await api('/api/run', { method: 'POST', body: JSON.stringify(body) });
     currentJobId = res.job_id;
     document.getElementById('btn-start').disabled = true;
-    document.getElementById('btn-stop').style.display = 'inline-block';
+    document.getElementById('btn-stop').style.display = 'inline-flex';
     document.getElementById('run-status').innerHTML = '<span class="status status-running">运行中</span>';
     document.getElementById('log-box').textContent = '';
+    document.getElementById('mineru-progress').classList.remove('active');
+    document.getElementById('mineru-error').classList.remove('active');
     pollLog();
   } catch (e) {
     alert('启动失败: ' + e.message);
@@ -321,20 +999,45 @@ async function pollLog() {
     document.getElementById('log-box').textContent = data.log || '(无日志)';
     const box = document.getElementById('log-box');
     box.scrollTop = box.scrollHeight;
+
+    // Update MinerU progress
+    if (data.mineru_progress) {
+      updateMinerUProgress(data.mineru_progress);
+    } else if (data.status === 'running') {
+      // Show indeterminate progress card for remote MinerU even before first marker arrives
+      const muMode = (configData?.mineru?.api_mode || 'local').toLowerCase();
+      if (muMode === 'remote') {
+        updateMinerUProgress({ phase: 'pending', pct: 0, extracted: 0, total: 0 });
+      }
+    }
+    // Show MinerU error
+    if (data.mineru_error) {
+      showMinerUError(data.mineru_error);
+    }
+
     if (data.status === 'running') {
       logPollTimer = setTimeout(pollLog, 2000);
     } else {
-      finishJob(data.status);
+      finishJob(data.status, data.mineru_error);
     }
   } catch (e) {
     logPollTimer = setTimeout(pollLog, 3000);
   }
 }
 
-function finishJob(status) {
+function finishJob(status, mineruError) {
   clearTimeout(logPollTimer);
   document.getElementById('btn-start').disabled = false;
   document.getElementById('btn-stop').style.display = 'none';
+
+  // Don't hide progress card on completion — leave it showing final state
+  // (it will be hidden when the next pipeline starts)
+
+  // Show MinerU error if present
+  if (mineruError) {
+    showMinerUError(mineruError);
+  }
+
   const cls = status === 'done' ? 'status-done' : status === 'failed' ? 'status-failed' : 'status-running';
   const label = status === 'done' ? '✓ 完成' : status === 'failed' ? '✗ 失败' : status;
   document.getElementById('run-status').innerHTML = `<span class="status ${cls}">${label}</span>`;
@@ -346,7 +1049,7 @@ async function loadOutputs() {
   const treeEl = document.getElementById('output-tree');
   treeEl.innerHTML = '';
   if (!data.tree?.children?.length) {
-    treeEl.innerHTML = '<p style="color:var(--dim)">outputs/ 目录为空</p>';
+    treeEl.innerHTML = '<p style="color:var(--muted)">outputs/ 目录为空</p>';
     return;
   }
   renderTree(data.tree, treeEl, '');
@@ -411,6 +1114,71 @@ async function previewFile(path) {
     viewer.style.display = 'block';
     viewer.textContent = 'Error: ' + e.message;
   }
+}
+
+// ── MinerU helpers ────────────────────────────────────────────────
+function setMinerUMode(mode) {
+  mineruMode = mode;
+  document.getElementById('mode-local').classList.toggle('active', mode === 'local');
+  document.getElementById('mode-remote').classList.toggle('active', mode === 'remote');
+  document.getElementById('mineru-local').classList.toggle('active', mode === 'local');
+  document.getElementById('mineru-remote').classList.toggle('active', mode === 'remote');
+}
+
+const PHASE_LABELS = {
+  uploading: '上传中',
+  queued: '排队中',
+  parsing: '解析中',
+  converting: '格式转换中',
+  running: '解析中',
+  pending: '排队中',
+  done: '完成',
+  failed: '失败',
+};
+
+function updateMinerUProgress(prog) {
+  const card = document.getElementById('mineru-progress');
+  const fill = document.getElementById('mineru-progress-fill');
+  const label = document.getElementById('mineru-progress-label');
+  const pages = document.getElementById('mineru-progress-pages');
+  const pctEl = document.getElementById('mineru-progress-pct');
+
+  card.classList.add('active');
+
+  const phase = prog.phase || 'unknown';
+  const phaseLabel = PHASE_LABELS[phase] || phase;
+  label.textContent = `MinerU ${phaseLabel}`;
+
+  const pct = prog.pct || 0;
+  const total = prog.total || 0;
+  const extracted = prog.extracted || 0;
+
+  if (total > 0) {
+    fill.classList.remove('indeterminate');
+    fill.style.width = pct + '%';
+    pages.textContent = `${extracted} / ${total} 页`;
+    pctEl.textContent = pct + '%';
+  } else {
+    fill.classList.add('indeterminate');
+    fill.style.width = '30%';
+    pages.textContent = phaseLabel;
+    pctEl.textContent = '';
+  }
+
+  // Hide error card when progress is flowing
+  if (phase !== 'failed') {
+    document.getElementById('mineru-error').classList.remove('active');
+  }
+}
+
+function showMinerUError(err) {
+  const card = document.getElementById('mineru-error');
+  const codeEl = document.getElementById('mineru-error-code');
+  const adviceEl = document.getElementById('mineru-error-advice');
+
+  codeEl.textContent = err.err_code ? `错误码: ${err.err_code} · ${err.message}` : err.message || '未知错误';
+  adviceEl.textContent = err.advice || '请稍后重试或检查配置';
+  card.classList.add('active');
 }
 
 // ── Init ─────────────────────────────────────────────────────────

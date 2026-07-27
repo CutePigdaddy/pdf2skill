@@ -5,6 +5,7 @@ Provides: config CRUD, input file listing, pipeline execution, output browsing.
 
 import json
 import os
+import re
 import subprocess
 import sys
 import threading
@@ -36,11 +37,17 @@ _running = {}  # job_id -> {status, log_path, process}
 
 
 def _load_settings() -> dict:
+    """Read and return the current settings.yaml as a dict."""
     with open(SETTINGS_PATH, "r", encoding="utf-8") as f:
         return yaml.safe_load(f)
 
 
 def _save_settings(data: dict):
+    """Write a settings dict to settings.yaml.
+
+    Args:
+        data: Full settings dict to persist.
+    """
     with open(SETTINGS_PATH, "w", encoding="utf-8") as f:
         yaml.dump(data, f, default_flow_style=False, allow_unicode=True, sort_keys=False)
 
@@ -60,7 +67,14 @@ def get_config():
         entry["api_key_set"] = bool(val)
         entry["api_key_preview"] = val[:4] + "****" if len(val) > 4 else ("****" if val else "")
         masked[name] = entry
-    return {"settings": data, "providers_masked": masked}
+    # MinerU API key status (separate from LLM providers)
+    mineru_key_val = os.getenv("MINERU_API_KEY", "")
+    mineru_key_status = {
+        "api_key_set": bool(mineru_key_val),
+        "api_key_preview": mineru_key_val[:4] + "****" if len(mineru_key_val) > 4 else ("****" if mineru_key_val else ""),
+    }
+
+    return {"settings": data, "providers_masked": masked, "mineru_key_status": mineru_key_status}
 
 
 @app.post("/api/config")
@@ -78,6 +92,8 @@ def update_config(body: dict):
         current["llm"]["routers"] = body["routers"]
     if "pdf" in body:
         current.setdefault("pdf", {}).update(body["pdf"])
+    if "mineru" in body:
+        current.setdefault("mineru", {}).update(body["mineru"])
     _save_settings(current)
     return {"ok": True}
 
@@ -95,7 +111,11 @@ def set_apikey(body: dict):
 
 @app.get("/api/inputs")
 def list_inputs():
-    """List files in the inputs/ directory."""
+    """List files in the inputs/ directory.
+
+    Returns:
+        Dict with ``files`` list of ``{name, relative, suffix, size}``.
+    """
     if not INPUTS_DIR.exists():
         return {"files": []}
     files = []
@@ -112,7 +132,18 @@ def list_inputs():
 
 @app.post("/api/run")
 def start_pipeline(body: dict):
-    """Start the pipeline as a subprocess."""
+    """Start the pipeline as a subprocess and track its status.
+
+    Args:
+        body: JSON with ``input_file``, ``mode``, ``output_dir``,
+            provider/model overrides, and ``request_interval``.
+
+    Returns:
+        Dict with ``job_id`` and ``status``.
+
+    Raises:
+        HTTPException: 409 if already running, 400/404 on bad input.
+    """
     for job_id, info in _running.items():
         if info["status"] == "running":
             raise HTTPException(409, f"Pipeline already running (job {job_id})")
@@ -120,6 +151,13 @@ def start_pipeline(body: dict):
     input_file = body.get("input_file", "")
     mode = body.get("mode", "pdf")
     output_dir = body.get("output_dir", "")
+    from_stage = body.get("from_stage", "")
+    restart = body.get("restart", False)
+
+    # Validate from_stage against allowed stage names
+    VALID_STAGES = ["pdf_conversion", "llm_chunking", "tree_merging"]
+    if from_stage and from_stage not in VALID_STAGES:
+        raise HTTPException(400, f"Invalid from_stage. Valid: {VALID_STAGES}")
     chunk_provider = body.get("chunk_provider", "")
     peel_provider = body.get("peel_provider", "")
     skill_provider = body.get("skill_provider", "")
@@ -162,7 +200,12 @@ def start_pipeline(body: dict):
         "--mode", mode,
     ]
 
-    log_f = open(log_path, "w", encoding="utf-8")
+    if restart:
+        cmd.append("--restart")
+    elif from_stage:
+        cmd.extend(["--from-stage", from_stage])
+
+    log_f = open(log_path, "w", encoding="utf-8", buffering=1)  # line-buffered so progress markers flush immediately
     proc = subprocess.Popen(
         cmd, env=env, stdout=log_f, stderr=subprocess.STDOUT,
         cwd=str(PROJECT_ROOT),
@@ -195,15 +238,29 @@ def start_pipeline(body: dict):
 
 @app.get("/api/status")
 def get_status(job_id: Optional[str] = None):
-    """Get pipeline status + logs."""
+    """Get pipeline status + logs + structured MinerU progress/error."""
     if not _running:
         return {"running": False, "jobs": []}
 
     if job_id and job_id in _running:
         info = _running[job_id]
         log_content = ""
+
+        # Flush the log file descriptor so the latest output is visible on disk
+        try:
+            info["log_fd"].flush()
+        except Exception:
+            pass
+
         if info["log_path"].exists():
             log_content = info["log_path"].read_text(encoding="utf-8", errors="replace")
+
+        # Parse latest MinerU progress marker from log
+        mineru_progress = _parse_mineru_progress(log_content)
+
+        # Parse MinerU structured error from log
+        mineru_error = _parse_mineru_error(log_content)
+
         return {
             "job_id": job_id,
             "status": info["status"],
@@ -211,14 +268,82 @@ def get_status(job_id: Optional[str] = None):
             "input_file": info["input_file"],
             "output_dir": info["output_dir"],
             "log": log_content,
+            "mineru_progress": mineru_progress,
+            "mineru_error": mineru_error,
         }
 
     jobs = [{"job_id": jid, "status": info["status"]} for jid, info in _running.items()]
     return {"running": any(j["status"] == "running" for j in jobs), "jobs": jobs}
 
 
+def _parse_mineru_progress(log_text: str):
+    """Extract the latest __MINERU_PROGRESS__{...} marker from log text."""
+    matches = re.findall(r'__MINERU_PROGRESS__(\{.*?\})', log_text)
+    if not matches:
+        return None
+    try:
+        return json.loads(matches[-1])
+    except json.JSONDecodeError:
+        return None
+
+
+def _parse_mineru_error(log_text: str):
+    """Extract MinerU error info from log text (err_code + Chinese message)."""
+    # Match MinerUAPIError output: "MinerUAPIError: <zh_msg> — <advice>"
+    err_match = re.search(
+        r'MinerU(?:Auth|File|Size|Quota|Service)?Error:\s*(.+?)(?:\n|$)',
+        log_text,
+    )
+    if not err_match:
+        return None
+    message = err_match.group(1).strip()
+    # Try to extract err_code from earlier in the same log section
+    code_match = re.search(r'err_code[=:]\s*["\']?(-?\w+)', log_text[err_match.start()-500:err_match.start()] if err_match.start() >= 500 else log_text[:err_match.start()])
+    err_code = code_match.group(1) if code_match else ""
+
+    # Split "中文消息 — 建议" format
+    parts = message.split(" — ", 1)
+    zh_msg = parts[0].strip()
+    advice = parts[1].strip() if len(parts) > 1 else ""
+
+    return {"err_code": err_code, "message": zh_msg, "advice": advice}
+
+
+@app.get("/api/progress")
+def get_progress(job_id: str = ""):
+    """Get MinerU progress for a specific job (convenience endpoint)."""
+    if not job_id or job_id not in _running:
+        return {"available": False}
+    info = _running[job_id]
+
+    # Flush so latest output is on disk
+    try:
+        info["log_fd"].flush()
+    except Exception:
+        pass
+
+    if not info["log_path"].exists():
+        return {"available": False}
+    log_content = info["log_path"].read_text(encoding="utf-8", errors="replace")
+    progress = _parse_mineru_progress(log_content)
+    if progress:
+        return {"available": True, **progress}
+    return {"available": False}
+
+
 @app.post("/api/stop")
 def stop_pipeline(body: dict):
+    """Terminate a running pipeline job.
+
+    Args:
+        body: JSON with ``job_id``.
+
+    Returns:
+        Dict with ``ok`` and optional ``msg``.
+
+    Raises:
+        HTTPException: 404 if job not found.
+    """
     job_id = body.get("job_id", "")
     if job_id not in _running:
         raise HTTPException(404, "Job not found")
@@ -236,7 +361,11 @@ def stop_pipeline(body: dict):
 
 @app.get("/api/outputs")
 def list_outputs():
-    """Return the outputs/ directory as a tree structure."""
+    """Return the outputs/ directory as a tree structure.
+
+    Returns:
+        Dict with ``tree`` containing nested ``{name, type, children, size}``.
+    """
     if not OUTPUTS_DIR.exists():
         return {"tree": {}}
 
@@ -262,7 +391,18 @@ def list_outputs():
 
 @app.get("/api/outputs/file")
 def read_output_file(path: str = ""):
-    """Read a specific file under outputs/."""
+    """Read a specific file under outputs/ with path-traversal protection.
+
+    Args:
+        path: Relative path under ``outputs/``.
+
+    Returns:
+        Text content, image file response, or binary metadata.
+
+    Raises:
+        HTTPException: 400 if no path, 403 if path escapes outputs/,
+            404 if not found.
+    """
     if not path:
         raise HTTPException(400, "path query param required")
     target = (OUTPUTS_DIR / path).resolve()
@@ -288,10 +428,11 @@ app.mount("/static", StaticFiles(directory=str(FRONTEND_DIR / "static")), name="
 
 @app.get("/")
 def index():
+    """Serve the frontend SPA index page."""
     html = (FRONTEND_DIR / "static" / "index.html").read_text(encoding="utf-8")
     return HTMLResponse(html)
 
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8501)
+    uvicorn.run(app, host="127.0.0.1", port=8501)
