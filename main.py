@@ -14,14 +14,39 @@ from core.tree_merger import TreeMerger, ChunkNode
 from core.skill_engine import SkillEngine
 from core.onboarding import OnboardingWizard
 
-def run_pipeline(pdf_path: str, output_dir: str):
+def run_pipeline(pdf_path: str, output_dir: str, from_stage: str = None, restart: bool = False):
+    """Execute the full 4-stage pdf2skill pipeline.
+
+    Stages: PDF→Markdown → LLM Chunking → TOC Drilling → Skill Generation.
+    Uses checkpointing to skip already-completed stages on re-run.
+
+    Args:
+        pdf_path: Path to the input PDF file.
+        output_dir: Directory for all pipeline output.
+        from_stage: If set, clear this stage and all later stages from
+            checkpoint before running (e.g. ``"llm_chunking"`` to re-run
+            Stage 2 onwards).
+        restart: If ``True``, clear all checkpoint data and run from scratch.
+    """
     logger.info(f"Starting pipeline for {pdf_path}")
     pdf_file = Path(pdf_path)
     out_dir = Path(output_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
     
     checkpoint = CheckpointManager(out_dir)
-    
+
+    if restart:
+        checkpoint.clear_all()
+        # Remove the primary output file so Stage 1 actually re-runs
+        stale_md = out_dir / "full.md"
+        if stale_md.exists():
+            stale_md.unlink()
+            logger.info("--restart: removed stale full.md")
+        logger.info("--restart: all checkpoint data cleared")
+    elif from_stage:
+        checkpoint.reset_from_stage(from_stage)
+        logger.info(f"--from-stage {from_stage}: checkpoint reset from '{from_stage}' onwards")
+
     # 1. PDF -> Markdown
     if not checkpoint.is_stage_completed("pdf_conversion"):
         logger.info("--- Stage 1: PDF to Markdown ---")
@@ -81,10 +106,17 @@ def run_pipeline(pdf_path: str, output_dir: str):
     logger.info("Pipeline Execution Finished Successfully!")
 
 def main():
+    """CLI entry point. Handles onboarding and delegates to ``run_pipeline``."""
     parser = argparse.ArgumentParser(description="PDF2Skills v2 - Refactored Pipeline")
     parser.add_argument("pdf_path", type=str, nargs='?', help="Path to the PDF file")
     parser.add_argument("--output", type=str, default="outputs", help="Output directory")
     parser.add_argument("--setup", action="store_true", help="Run the onboarding wizard to configure settings")
+    resume_group = parser.add_mutually_exclusive_group()
+    resume_group.add_argument("--from-stage", type=str, default=None,
+                        choices=["pdf_conversion", "llm_chunking", "tree_merging"],
+                        help="Restart from this stage (clears it and all later stages from checkpoint)")
+    resume_group.add_argument("--restart", action="store_true",
+                        help="Clear all checkpoint data and run from scratch")
     args = parser.parse_args()
 
     project_root = Path(__file__).parent
@@ -98,7 +130,7 @@ def main():
         parser.error("pdf_path is required after setup")
 
     try:
-        run_pipeline(args.pdf_path, args.output)
+        run_pipeline(args.pdf_path, args.output, from_stage=args.from_stage, restart=args.restart)
     except Exception as e:
         logger.exception("Pipeline crashed: {}".format(e))
         sys.exit(1)

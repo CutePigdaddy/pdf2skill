@@ -4,6 +4,7 @@ import shutil
 import requests
 from pathlib import Path
 from dataclasses import dataclass, field
+from tqdm import tqdm
 from utils.logger import logger, LLMParsingError
 from utils.llm_client import LLMClient
 from config.config import config
@@ -49,10 +50,11 @@ class ChunkNode:
         return node
 
 class TreeMerger:
-    """
-    Handles Stage 3: TOC Drilling & Merging.
-    Recursively "peels" large chunks into smaller logical sub-chunks by identifying
-    sub-headers using an LLM, until all chunks are within the token limit.
+    """Stage 3: TOC Drilling & Merging.
+
+    Recursively "peels" large chunks into smaller logical sub-chunks by
+    identifying sub-headers using an LLM, until all chunks are within
+    the token limit.
     """
     def __init__(self):
         self.chunk_max_tokens = config.get("pdf.chunk_max_tokens", 10000)
@@ -63,20 +65,37 @@ class TreeMerger:
         self.llm = LLMClient(stage="peeling")
         self.chunk_counter = 0
         self.peel_errors = 0  # Track LLM failures during peeling
+        self._peel_bar = None  # tqdm bar for build_and_merge
 
     def _generate_chunk_id(self) -> str:
         self.chunk_counter += 1
         return f"chunk_{self.chunk_counter:04d}"
 
     def estimate_tokens(self, text: str) -> int:
-        """Rough estimation of token count based on character length."""
+        """Rough estimation of token count based on character length.
+
+        Args:
+            text: Input text.
+
+        Returns:
+            Estimated token count (chars / 2).
+        """
         return len(text) // self.chars_per_token
 
     def find_anchor_position(self, content: str, anchor: str) -> int:
-        """
-        Locates the position of a sub-header anchor in the text.
-        Uses Levenshtein distance for fuzzy matching to handle LLM minor variations.
-        Skips fuzzy matching for very large content to avoid O(n*m) CPU cost.
+        """Locate a sub-header anchor in the text using exact then fuzzy matching.
+
+        Uses Levenshtein distance for fuzzy matching to handle minor LLM
+        variations.  Skips fuzzy matching for very large content (>50k
+        chars) to avoid O(n*m) CPU cost.
+
+        Args:
+            content: The full text to search in.
+            anchor: The anchor string to find (exact ``chunk_anchor_length``
+                chars from the LLM output).
+
+        Returns:
+            Character offset of the anchor, or ``-1`` if not found.
         """
         anchor = anchor.strip()
         if not anchor:
@@ -119,18 +138,21 @@ class TreeMerger:
         return best_pos
 
     def recursive_peel(self, chunk: ChunkNode, current_iteration: int = 2) -> list[ChunkNode]:
-        """
-        Recursively splits a ChunkNode if it exceeds token limits.
-        
+        """Recursively split a ChunkNode if it exceeds token limits.
+
+        Asks the LLM for split anchors or an atomic declaration, then
+        splits the content at those anchors and recurses on each child.
+
         Args:
             chunk: The ChunkNode to process.
-            current_iteration: The current depth of recursion.
-            
+            current_iteration: Current recursion depth (starts at 2).
+
         Returns:
-            A list of smaller sub-chunks.
+            List of smaller sub-chunks (leaf nodes).
         """
         if getattr(chunk, 'is_atomic', False):
-            logger.info(f"  [Atomic Protection] Skipping recursive peel for: {chunk.title} (ID: {chunk.id})")
+            logger.debug(f"  [Atomic Protection] Skipping recursive peel for: {chunk.title} (ID: {chunk.id})")
+            tqdm.write(f"  [Atomic] {chunk.title}")
             return [chunk]
 
         if current_iteration > self.chunk_max_iterations:
@@ -143,6 +165,8 @@ class TreeMerger:
             return [chunk]
 
         logger.info(f"  Peeling {chunk.id} (iteration {current_iteration}, ~{estimated_tokens:,} tokens)...")
+        if self._peel_bar is not None:
+            self._peel_bar.set_postfix_str(f"{chunk.id} iter={current_iteration}")
 
         # LLM-assisted splitting prompt.
         # It asks the model to either provide split anchors or mark the section as atomic.
@@ -217,7 +241,8 @@ Return ONLY the JSON object. No prose."""
                 result = json.loads(response)
 
             if result.get("is_atomic", False):
-                logger.info(f"  [AI Decision] Chunk {chunk.id} marked as ATOMIC. Skipping split.")
+                logger.debug(f"  [AI Decision] Chunk {chunk.id} marked as ATOMIC. Skipping split.")
+                tqdm.write(f"  [Atomic] {chunk.title} (AI decision)")
                 chunk.is_atomic = True
                 return [chunk]
 
@@ -229,7 +254,7 @@ Return ONLY the JSON object. No prose."""
             return [chunk]
 
         if not anchors:
-            logger.info("    No anchors found, keeping chunk as-is")
+            logger.debug("    No anchors found, keeping chunk as-is")
             return [chunk]
 
         split_positions = [0]
@@ -255,7 +280,7 @@ Return ONLY the JSON object. No prose."""
         suggested_titles = [x[1] for x in combined]
 
         if len(split_positions) <= 2:
-            logger.info("    No valid split positions found")
+            logger.debug("    No valid split positions found")
             return [chunk]
 
         raw_child_chunks = []
@@ -296,7 +321,7 @@ Return ONLY the JSON object. No prose."""
                 # Merge with NEXT if available
                 if i + 1 < len(raw_child_chunks):
                     next_chunk = raw_child_chunks[i+1]
-                    logger.info(f"    Merging small chunk '{current['title']}' ({len(current['content'])} chars) with next chunk.")
+                    logger.debug(f"    Merging small chunk '{current['title']}' ({len(current['content'])} chars) with next chunk.")
                     next_chunk["content"] = current["content"] + "\n\n" + next_chunk["content"]
                     # Update next title if it's a simple part titration
                     if " & " not in next_chunk["title"]:
@@ -306,7 +331,7 @@ Return ONLY the JSON object. No prose."""
                 # Merge with PREVIOUS if no next
                 elif child_chunks:
                     prev_chunk = child_chunks[-1]
-                    logger.info(f"    Merging small trailing chunk '{current['title']}' ({len(current['content'])} chars) with previous chunk.")
+                    logger.debug(f"    Merging small trailing chunk '{current['title']}' ({len(current['content'])} chars) with previous chunk.")
                     prev_chunk.content += "\n\n" + current["content"]
                     if " & " not in prev_chunk.title:
                         prev_chunk.title = f"{prev_chunk.title} & {current['title']}"
@@ -336,9 +361,18 @@ Return ONLY the JSON object. No prose."""
         return final_chunks
 
     def build_and_merge(self, llm_chunks: list) -> ChunkNode:
+        """Peel all base chunks and assemble them under a master root.
+
+        Args:
+            llm_chunks: List of base chunk dicts from ``LLMChunker.extract_chunks``.
+
+        Returns:
+            A ``ChunkNode`` tree rooted at the master node.
+        """
         self.peel_errors = 0  # Reset error counter for this run
         master_root = ChunkNode(id="master", title="Document", parent_path=[])
-        
+        self._peel_bar = tqdm(total=len(llm_chunks), desc="Peeling", unit="chunk", ncols=80)
+
         for idx, c in enumerate(llm_chunks):
             # Try to get the real title from content or fallback
             title = "Document Section"
@@ -352,8 +386,8 @@ Return ONLY the JSON object. No prose."""
 
             # Detect if this chunk should be atomic based on content patterns
             is_atomic = c.get("is_atomic", False)
-            
-            # Use LLM decision if available, only fallback to basic sanity check for TOC 
+
+            # Use LLM decision if available, only fallback to basic sanity check for TOC
             if not is_atomic:
                 content_lower = content.lower()
                 # We only force atomic for very specific, non-content heavy headers if LLM didn't catch it
@@ -370,14 +404,28 @@ Return ONLY the JSON object. No prose."""
                 end_line=c.get("end_line", 0),
                 is_atomic=is_atomic
             )
-            
+
             # Recurse into peeling for the node, but add directly to master children
             peeled_nodes = self.recursive_peel(node)
             master_root.children.extend(peeled_nodes)
-            
+            self._peel_bar.update(1)
+
+        self._peel_bar.close()
+        self._peel_bar = None
         return master_root
 
     def _write_chunk_files(self, output_dir: Path, chunks: list[ChunkNode], include_tree: bool = False, root: ChunkNode = None) -> Path:
+        """Write chunk Markdown files and an optional tree.json to disk.
+
+        Args:
+            output_dir: Target directory.
+            chunks: Flat list of ChunkNode objects to write.
+            include_tree: Whether to write ``tree.json``.
+            root: Root node for the tree JSON (required if *include_tree*).
+
+        Returns:
+            The output directory Path.
+        """
         output_dir.mkdir(parents=True, exist_ok=True)
 
         if include_tree and root is not None:
@@ -425,6 +473,15 @@ tokens: ~{self.estimate_tokens(chunk.content)}
         return output_dir
 
     def save_results(self, output_dir: str | Path, root: ChunkNode) -> Path:
+        """Save the final peeled chunk tree to disk.
+
+        Args:
+            output_dir: Target directory.
+            root: Root ChunkNode of the tree.
+
+        Returns:
+            The output directory Path.
+        """
         output_dir = Path(output_dir)
         flat_chunks = []
 
@@ -438,6 +495,15 @@ tokens: ~{self.estimate_tokens(chunk.content)}
         return self._write_chunk_files(output_dir, flat_chunks, include_tree=True, root=root)
 
     def save_original_chunks(self, output_dir: str | Path, base_chunks: list[dict]) -> Path:
+        """Save the un-peeled base chunks to disk for reference.
+
+        Args:
+            output_dir: Target directory.
+            base_chunks: List of base chunk dicts from ``LLMChunker``.
+
+        Returns:
+            The output directory Path.
+        """
         output_dir = Path(output_dir)
         original_nodes = []
 

@@ -13,6 +13,18 @@ class LLMClient:
     Provider configuration is fully driven by settings.yaml — no provider names are hardcoded.
     """
     def __init__(self, stage: str = "skill_engine"):
+        """Initialise an LLM client for a specific pipeline stage.
+
+        Provider, model, and API key are resolved in order:
+        per-stage env var → global env var → settings.yaml.
+
+        Args:
+            stage: Pipeline stage name (``"chunking"``, ``"peeling"``,
+                or ``"skill_engine"``).
+
+        Raises:
+            ValueError: If provider, base_url, API key, or model is missing.
+        """
         self.stage = stage
         
         # 1. Determine Provider
@@ -82,7 +94,17 @@ class LLMClient:
         logger.info(f"Initialized LLMClient [{self.stage}] -> provider: {self.provider}, model: {self.model}, base_url: {self.base_url}, interval: {self.request_interval}s")
 
     def chat(self, prompt: str, is_json: bool = False, max_tokens: int = None) -> str:
-        """Sends a prompt to the configured LLM provider and returns the response."""
+        """Send a prompt to the configured LLM provider and return the response.
+
+        Args:
+            prompt: User message to send.
+            is_json: If ``True``, requests JSON response format and injects
+                a system prompt requiring valid JSON output.
+            max_tokens: Override the default max_tokens for this call.
+
+        Returns:
+            The assistant's response text.
+        """
         if self.request_interval > 0:
             time.sleep(self.request_interval)
             
@@ -109,6 +131,21 @@ class LLMClient:
         return resp.json()["choices"][0]["message"]["content"]
 
     def parse_json_response(self, text: str) -> dict:
+        """Extract a JSON object from an LLM response string.
+
+        Tries ``json.loads`` first, then falls back to extracting the
+        outermost ``{…}`` and parsing with ``ast.literal_eval``.
+        Strips ``<think>`` tags emitted by reasoning models.
+
+        Args:
+            text: Raw LLM response.
+
+        Returns:
+            Parsed dictionary.
+
+        Raises:
+            LLMParsingError: If the response cannot be parsed as JSON.
+        """
         # Compat with reasoning models that may include <think> tags
         text = re.sub(r'<think>.*?</think>', '', text, flags=re.DOTALL)
         

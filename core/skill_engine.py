@@ -1,6 +1,7 @@
 import re
 import shutil
 from pathlib import Path
+from tqdm import tqdm
 from core.tree_merger import ChunkNode
 from utils.logger import logger
 from utils.llm_client import LLMClient
@@ -8,12 +9,18 @@ from config.config import config
 from utils.checkpoint import CheckpointManager
 
 class SkillEngine:
-    """
-    Stage 4: Skill Generation.
-    Iterates through the final hierarchy of chunks and generates descriptive SKILL tags
-    for each, along with a master index and individual reference files.
+    """Stage 4: Skill Generation.
+
+    Iterates through the final hierarchy of chunks and generates
+    descriptive SKILL tags for each, along with a master index
+    (``SKILL.md``) and individual reference files.
     """
     def __init__(self, output_dir: Path):
+        """Initialise the skill engine with LLM client and prompt templates.
+
+        Args:
+            output_dir: Directory for generated skill output.
+        """
         self.llm = LLMClient(stage="skill_engine")
         self.output_dir = output_dir
         self.output_dir.mkdir(parents=True, exist_ok=True)
@@ -22,7 +29,14 @@ class SkillEngine:
         self.book_prompt = (self.prompts_dir / "book_summary.txt").read_text(encoding="utf-8")
 
     def _collect_flat_nodes(self, node: ChunkNode) -> list[ChunkNode]:
-        """Flattens the chunk tree into a list of nodes for processing."""
+        """Flatten the chunk tree into a flat list of non-root nodes.
+
+        Args:
+            node: Root ChunkNode to traverse.
+
+        Returns:
+            List of all ChunkNode objects (excluding master/root).
+        """
         nodes = []
         if getattr(node, 'id', None) and node.id not in ("master", "root"):
             nodes.append(node)
@@ -31,12 +45,16 @@ class SkillEngine:
         return nodes
 
     def generate(self, root_node: ChunkNode, book_title: str):
-        """
-        Orchestrates the skill generation process:
-        1. Summarizes the book overview.
-        2. Tags each individual chunk with keywords/skills.
-        3. Saves reference files for each chunk.
-        4. Compiles the master SKILL.md index.
+        """Orchestrate the full skill generation process.
+
+        1. Summarises the book overview via LLM.
+        2. Tags each chunk with keywords/skills.
+        3. Saves individual reference Markdown files.
+        4. Compiles the master ``SKILL.md`` index.
+
+        Args:
+            root_node: Root of the ChunkNode tree from Stage 3.
+            book_title: Title used for the skill index name and frontmatter.
         """
         logger.info(f"Generating SKILL mapped index for '{book_title}'")
         checkpoint = CheckpointManager(self.output_dir)
@@ -81,15 +99,18 @@ class SkillEngine:
         summaries = checkpoint.get_stage_data("summaries") or {}
 
         # 2. Individual Chunk Tagging
+        bar = tqdm(total=len(all_nodes), desc="Skill标签", unit="chunk", ncols=80)
         for idx, node in enumerate(all_nodes, 1):
             if node.id in summaries:
+                bar.update(1)
                 continue
-                
-            logger.info(f"Tagging chunk {idx}/{len(all_nodes)}: {node.title}")
+
+            bar.set_postfix_str(node.title[:20])
             preview = node.content[:2000] # Use a preview to save tokens
             
             if not preview.strip():
                 summaries[node.id] = "No explicit content"
+                bar.update(1)
                 continue
                 
             prompt = self.skill_prompt.format(content_preview=preview)
@@ -107,6 +128,8 @@ class SkillEngine:
                 logger.error(f"Error tagging chunk {node.id}: {e}")
                 # Not written to summaries so chunk can be retried on re-run
 
+            bar.update(1)
+
             # 3. Save reference Markdown with frontmatter
             ref_file = ref_dir / f"{node.id}.md"
             path_str = ' > '.join(node.parent_path) if node.parent_path else 'Root'
@@ -120,6 +143,8 @@ end_line: {node.end_line}
 
 """
             ref_file.write_text(metadata + node.content, encoding="utf-8")
+
+        bar.close()
 
         # 3. Create Master Index
         kebab_name = re.sub(r"[^a-zA-Z0-9]+", "-", book_title.lower()).strip("-")

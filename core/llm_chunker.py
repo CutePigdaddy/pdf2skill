@@ -1,6 +1,7 @@
 import re
 from pathlib import Path
 from dataclasses import dataclass
+from tqdm import tqdm
 from utils.logger import logger
 from utils.llm_client import LLMClient
 from config.config import config
@@ -12,24 +13,28 @@ class Header:
     line_number: int
 
 class LLMChunker:
-    """
-    Handles the first stage of document processing: Strategic Chunking.
-    Uses an LLM to analyze the document's header structure (TOC) and decide 
-    where to split major sections to preserve conceptual integrity.
+    """Stage 2: Strategic Chunking.
+
+    Uses an LLM to analyse the document's header structure (TOC) and
+    decide where to split major sections to preserve conceptual integrity.
     """
     def __init__(self):
         self.llm = LLMClient(stage="chunking")
         self.prompt_template = (Path(config.get("paths.prompts_dir", "prompts")) / "chunk_strategy.txt").read_text(encoding="utf-8")
 
     def split(self, markdown_path: Path) -> dict:
-        """
-        Extracts headers from markdown and asks LLM for a splitting plan.
-        
-        The plan includes:
-        - Major chapter split points
-        - Table of Contents (TOC) range
-        - Preface range
-        - Atomic ranges (exercises, etc.) that should not be split further
+        """Extract headers from Markdown and ask the LLM for a splitting plan.
+
+        The plan includes major chapter split points, TOC range, preface
+        range, and atomic ranges (exercises, etc.) that should not be
+        split further.
+
+        Args:
+            markdown_path: Path to the source Markdown file.
+
+        Returns:
+            Dict with keys ``splits``, ``toc_range``, ``preface_range``,
+            ``atomic_ranges``, ``headers``, ``lines``, ``fallback``.
         """
         logger.info(f"Analyzing document structure: {markdown_path}")
         content = markdown_path.read_text(encoding="utf-8")
@@ -55,14 +60,17 @@ class LLMChunker:
             prompt = prompt.replace("{estimated_tokens}", str(total_chars // 2))
             
         logger.info("Requesting strategic split points from LLM...")
+        bar = tqdm(total=2, desc="Chunking策略", unit="attempt", ncols=80)
         split_plan = None
         used_fallback = False
         for attempt in range(2):
             try:
                 response = self.llm.chat(prompt, is_json=True)
                 split_plan = self.llm.parse_json_response(response)
+                bar.update(1)
                 break
             except Exception as e:
+                bar.update(1)
                 logger.warning(f"LLM chunk strategy attempt {attempt + 1} failed: {e}")
         if split_plan is None:
             logger.warning("All LLM attempts failed, falling back to uniform splitting")
@@ -71,6 +79,8 @@ class LLMChunker:
             step = total // num_chunks
             split_plan = {"chapter_splits": [i * step for i in range(1, num_chunks)]}
             used_fallback = True
+
+        bar.close()
 
         return {
             "splits": split_plan.get("chapter_splits", []),
@@ -83,7 +93,14 @@ class LLMChunker:
         }
 
     def _build_tree_text(self, headers: list[Header]) -> str:
-        """Converts header list into a simplified text tree for LLM analysis."""
+        """Convert a header list into a simplified text tree for LLM analysis.
+
+        Args:
+            headers: List of ``Header`` objects.
+
+        Returns:
+            Newline-separated string like ``[Line 12] ## Chapter 1``.
+        """
         lines = []
         for h in headers:
             # Inclue more levels for better context if necessary, but keep it concise
@@ -94,7 +111,18 @@ class LLMChunker:
         return "\n".join(lines)
 
     def extract_chunks(self, split_data: dict) -> list:
-        """Creates the initial base chunks according to the strategic splits"""
+        """Create base chunks according to the LLM splitting plan.
+
+        Marks the Table of Contents range as atomic (un-splittable).
+
+        Args:
+            split_data: Output of ``split()``, containing ``lines``,
+                ``splits``, ``toc_range``, etc.
+
+        Returns:
+            List of chunk dicts with ``start_line``, ``end_line``,
+            ``content``, and ``is_atomic`` keys.
+        """
         lines = split_data["lines"]
         splits = sorted(set([1] + split_data.get("splits", []) + [len(lines) + 1]))
         

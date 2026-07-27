@@ -8,13 +8,22 @@ QUIT_SIGNAL = "q"
 
 
 class _QuitRequested(Exception):
-    """Raised when user types q during onboarding."""
+    """Raised when the user types 'q' during onboarding."""
 
 
 class OnboardingWizard:
-    """First-run onboarding wizard for pdf2skill."""
+    """First-run onboarding wizard for pdf2skill.
+
+    Guides the user through MinerU mode, LLM provider, API key, and
+    model configuration, persisting the result to ``.env``.
+    """
 
     def __init__(self, project_root: Path = None):
+        """Initialise with the project root path.
+
+        Args:
+            project_root: Root directory containing ``.env``.
+        """
         self.project_root = project_root or Path.cwd()
         self.env_path = self.project_root / ".env"
 
@@ -243,6 +252,14 @@ class OnboardingWizard:
         return default or choices[0]
 
     def _format_choices(self, choices: list) -> str:
+        """Format choices as a numbered string, e.g. ``1:remote, 2:local``.
+
+        Args:
+            choices: List of option strings.
+
+        Returns:
+            Formatted string.
+        """
         parts = []
         for i, c in enumerate(choices):
             parts.append("{}:{}".format(i + 1, c))
@@ -267,6 +284,14 @@ class OnboardingWizard:
         return True
 
     def _build_summary(self, env: dict) -> list:
+        """Build a human-readable summary of the configuration.
+
+        Args:
+            env: Dict of env var name → value.
+
+        Returns:
+            List of formatted string lines.
+        """
         lines = []
         mode = env.get("MINERU_API_MODE", "local")
         lines.append("{}MinerU Mode    : {}".format(Fore.WHITE, mode))
