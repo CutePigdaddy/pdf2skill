@@ -131,8 +131,27 @@ def main():
 
     try:
         run_pipeline(args.pdf_path, args.output, from_stage=args.from_stage, restart=args.restart)
+    except KeyboardInterrupt:
+        logger.warning("用户中断执行 (Ctrl+C) — 已保存的 checkpoint 数据不会丢失，重新运行将从断点继续")
+        sys.exit(130)
+    except ValueError as e:
+        # Config/auth errors from LLMClient — already have friendly messages
+        logger.error(f"配置错误: {e}")
+        sys.exit(1)
+    except ImportError as e:
+        logger.error(f"依赖缺失: {e}\n请运行: pip install -r requirements.txt")
+        sys.exit(1)
+    except FileNotFoundError as e:
+        logger.error(f"文件未找到: {e}")
+        sys.exit(1)
     except Exception as e:
-        logger.exception("Pipeline crashed: {}".format(e))
+        err_name = type(e).__name__
+        if err_name == "LLMConnectionError":
+            logger.error(f"LLM 连接失败:\n{e}")
+        elif err_name == "NetworkError":
+            logger.error(f"网络请求失败:\n{e}")
+        else:
+            logger.exception(f"Pipeline 崩溃: {e}")
         sys.exit(1)
 
 if __name__ == "__main__":

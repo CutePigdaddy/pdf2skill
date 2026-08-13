@@ -278,50 +278,57 @@ class RemoteMinerUProcessor:
 
         start_time = time.time()
 
-        while True:
-            elapsed = time.time() - start_time
-            if elapsed > timeout:
-                raise MinerUServiceError(err_code="-TIMEOUT", api_msg="MinerU conversion timed out")
+        try:
+            while True:
+                elapsed = time.time() - start_time
+                if elapsed > timeout:
+                    raise MinerUServiceError(err_code="-TIMEOUT", api_msg="MinerU conversion timed out")
 
-            resp = RetrySession.get(url=poll_url, headers=self.headers)
-            data = resp.json()
-            if data.get("code") != 0:
-                _raise_mineru_error(data.get("code"), data.get("msg", ""))
+                resp = RetrySession.get(url=poll_url, headers=self.headers)
+                data = resp.json()
+                if data.get("code") != 0:
+                    _raise_mineru_error(data.get("code"), data.get("msg", ""))
 
-            # Extract state and progress depending on endpoint type
-            if batch_id:
-                results = data["data"].get("extract_result", [])
-                if not results:
-                    self._emit_progress("pending")
+                # Extract state and progress depending on endpoint type
+                if batch_id:
+                    results = data["data"].get("extract_result", [])
+                    if not results:
+                        self._emit_progress("pending")
+                        time.sleep(10)
+                        continue
+                    file_result = results[0]
+                else:
+                    file_result = data["data"]
+
+                state = file_result.get("state", "unknown")
+
+                if state == "done":
+                    self._emit_progress("done", total=1, extracted=1)
+                    if hasattr(self, '_bar') and self._bar is not None:
+                        self._bar.close()
+                        self._bar = None
+                    return file_result
+                elif state == "failed":
+                    err_code = file_result.get("err_code", "")
+                    err_msg = file_result.get("err_msg", "Unknown error")
+                    progress_data = {"phase": "failed", "err_msg": err_msg, "err_code": str(err_code)}
+                    logger.debug(f"__MINERU_PROGRESS__{json.dumps(progress_data, ensure_ascii=False)}")
+                    if hasattr(self, '_bar') and self._bar is not None:
+                        self._bar.close()
+                        self._bar = None
+                    _raise_mineru_error(err_code, err_msg)
+                else:
+                    progress = file_result.get("extract_progress", {})
+                    extracted = progress.get("extracted_pages", 0)
+                    total = progress.get("total_pages", 0)
+                    self._emit_progress(state, extracted, total, progress.get("start_time"))
                     time.sleep(10)
-                    continue
-                file_result = results[0]
-            else:
-                file_result = data["data"]
-
-            state = file_result.get("state", "unknown")
-
-            if state == "done":
-                self._emit_progress("done", total=1, extracted=1)
-                if hasattr(self, '_bar') and self._bar is not None:
-                    self._bar.close()
-                    self._bar = None
-                return file_result
-            elif state == "failed":
-                err_code = file_result.get("err_code", "")
-                err_msg = file_result.get("err_msg", "Unknown error")
-                progress_data = {"phase": "failed", "err_msg": err_msg, "err_code": str(err_code)}
-                logger.debug(f"__MINERU_PROGRESS__{json.dumps(progress_data, ensure_ascii=False)}")
-                if hasattr(self, '_bar') and self._bar is not None:
-                    self._bar.close()
-                    self._bar = None
-                _raise_mineru_error(err_code, err_msg)
-            else:
-                progress = file_result.get("extract_progress", {})
-                extracted = progress.get("extracted_pages", 0)
-                total = progress.get("total_pages", 0)
-                self._emit_progress(state, extracted, total, progress.get("start_time"))
-                time.sleep(10)
+        except KeyboardInterrupt:
+            if hasattr(self, '_bar') and self._bar is not None:
+                self._bar.close()
+                self._bar = None
+            logger.warning("用户中断 MinerU 轮询 (Ctrl+C) — 转换任务仍在 MinerU 服务端运行")
+            raise
 
     # ── Download & Extract ────────────────────────────────────────
 

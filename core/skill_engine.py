@@ -1,5 +1,6 @@
 import re
 import shutil
+import time
 from pathlib import Path
 from tqdm import tqdm
 from core.tree_merger import ChunkNode
@@ -27,6 +28,7 @@ class SkillEngine:
         self.prompts_dir = Path(config.get("paths.prompts_dir", "prompts"))
         self.skill_prompt = (self.prompts_dir / "skill_paradigm.txt").read_text(encoding="utf-8")
         self.book_prompt = (self.prompts_dir / "book_summary.txt").read_text(encoding="utf-8")
+        self.name_prompt = (self.prompts_dir / "skill_name.txt").read_text(encoding="utf-8")
 
     def _collect_flat_nodes(self, node: ChunkNode) -> list[ChunkNode]:
         """Flatten the chunk tree into a flat list of non-root nodes.
@@ -43,6 +45,59 @@ class SkillEngine:
         for child in getattr(node, 'children', []):
             nodes.extend(self._collect_flat_nodes(child))
         return nodes
+
+    @staticmethod
+    def _validate_kebab_name(name: str) -> bool:
+        """Check whether *name* is a valid kebab-case skill identifier.
+
+        Rules from the Claude Code skill spec:
+        - Only ``a-z``, ``0-9``, and hyphens
+        - No leading, trailing, or consecutive hyphens
+        - Maximum 64 characters
+        """
+        if not name or len(name) > 64:
+            return False
+        if not re.fullmatch(r"[a-z0-9-]+", name):
+            return False
+        if name.startswith("-") or name.endswith("-") or "--" in name:
+            return False
+        return True
+
+    def _generate_skill_name(self, book_title: str, overview: str, toc: str) -> str:
+        """Produce a spec-compliant kebab-case skill name.
+
+        Tries the LLM first (via ``skill_name.txt`` prompt), then falls
+        back to regex-based conversion, and finally to a timestamp.
+        """
+        # 1. Try LLM-based generation
+        try:
+            toc_preview = toc[:2000]
+            prompt = self.name_prompt.format(
+                book_title=book_title,
+                overview=overview[:1000],
+                toc=toc_preview,
+            )
+            raw = self.llm.chat(prompt).strip()
+            # Take only the first line in case the LLM adds extra text
+            candidate = raw.split("\n")[0].strip()
+            if self._validate_kebab_name(candidate):
+                logger.info(f"LLM-generated skill name: {candidate}")
+                return candidate
+            logger.warning(f"LLM name '{candidate}' failed validation, falling back to regex")
+        except Exception as e:
+            logger.warning(f"LLM name generation failed: {e}, falling back to regex")
+
+        # 2. Fallback: regex-based kebab conversion
+        kebab = re.sub(r"[^a-zA-Z0-9]+", "-", book_title.lower()).strip("-")
+        # Remove consecutive hyphens and truncate
+        kebab = re.sub(r"-+", "-", kebab)[:64].rstrip("-")
+        if self._validate_kebab_name(kebab):
+            return kebab
+
+        # 3. Last resort: timestamp-based name
+        fallback = f"skill-{int(time.time())}"
+        logger.warning(f"Name fallback to timestamp: {fallback}")
+        return fallback
 
     def generate(self, root_node: ChunkNode, book_title: str):
         """Orchestrate the full skill generation process.
@@ -100,40 +155,43 @@ class SkillEngine:
 
         # 2. Individual Chunk Tagging
         bar = tqdm(total=len(all_nodes), desc="Skill标签", unit="chunk", ncols=80)
-        for idx, node in enumerate(all_nodes, 1):
-            if node.id in summaries:
+        try:
+            for idx, node in enumerate(all_nodes, 1):
+                if node.id in summaries:
+                    bar.update(1)
+                    continue
+
+                bar.set_postfix_str(node.title[:20])
+                preview = node.content[:2000] # Use a preview to save tokens
+
+                if not preview.strip():
+                    summaries[node.id] = "No explicit content"
+                    bar.update(1)
+                    continue
+
+                prompt = self.skill_prompt.format(content_preview=preview)
+
+                try:
+                    tags = self.llm.chat(prompt).strip()
+                    # Normalize separators: semicolons (both EN/CN) and newlines → " | "
+                    tags = re.sub(r"[;\n；]", " | ", tags)
+                    tags = re.sub(r"\s*\|\s*", " | ", tags)
+                    tags = re.sub(r"\|\s+\|", "|", tags)
+                    summaries[node.id] = tags
+
+                    # Persistent progress tracking
+                    checkpoint.state["data"]["summaries"] = summaries
+                    checkpoint.save()
+                except Exception as e:
+                    logger.error(f"Error tagging chunk {node.id}: {e}")
+                    # Not written to summaries so chunk can be retried on re-run
+
                 bar.update(1)
-                continue
 
-            bar.set_postfix_str(node.title[:20])
-            preview = node.content[:2000] # Use a preview to save tokens
-            
-            if not preview.strip():
-                summaries[node.id] = "No explicit content"
-                bar.update(1)
-                continue
-                
-            prompt = self.skill_prompt.format(content_preview=preview)
-            
-            try:
-                tags = self.llm.chat(prompt).strip()
-                # Formatting: Convert newlines and semicolons to consistent separators
-                tags = tags.replace("\n", " ").replace(";", " | ")
-                summaries[node.id] = tags
-                
-                # Persistent progress tracking
-                checkpoint.state["data"]["summaries"] = summaries
-                checkpoint.save()
-            except Exception as e:
-                logger.error(f"Error tagging chunk {node.id}: {e}")
-                # Not written to summaries so chunk can be retried on re-run
-
-            bar.update(1)
-
-            # 3. Save reference Markdown with frontmatter
-            ref_file = ref_dir / f"{node.id}.md"
-            path_str = ' > '.join(node.parent_path) if node.parent_path else 'Root'
-            metadata = f"""---
+                # 3. Save reference Markdown with frontmatter
+                ref_file = ref_dir / f"{node.id}.md"
+                path_str = ' > '.join(node.parent_path) if node.parent_path else 'Root'
+                metadata = f"""---
 id: {node.id}
 title: {node.title}
 parent_path: {path_str}
@@ -142,19 +200,46 @@ end_line: {node.end_line}
 ---
 
 """
-            ref_file.write_text(metadata + node.content, encoding="utf-8")
-
-        bar.close()
+                ref_file.write_text(metadata + node.content, encoding="utf-8")
+        except KeyboardInterrupt:
+            bar.close()
+            tagged = len(summaries)
+            total = len(all_nodes)
+            logger.warning(
+                f"用户中断 Skill 标签生成 (Ctrl+C) — "
+                f"已完成 {tagged}/{total} 个 chunk，进度已保存至 checkpoint"
+            )
+            raise
+        finally:
+            bar.close()
 
         # 3. Create Master Index
-        kebab_name = re.sub(r"[^a-zA-Z0-9]+", "-", book_title.lower()).strip("-")
-        
-        # Determine the description for metadata
-        # If we have a dedicated metadata description from the LLM, use it
+        # Generate skill name via LLM + validation + fallback chain
+        if not checkpoint.is_stage_completed("skill_name"):
+            toc_preview = "\n".join(toc_lines)
+            kebab_name = self._generate_skill_name(book_title, book_overview, toc_preview)
+            checkpoint.mark_stage_completed("skill_name", {"name": kebab_name})
+        else:
+            kebab_name = checkpoint.get_stage_data("skill_name").get("name", "")
+
+        # Sanitise the description for spec compliance
         skill_description = metadata_desc.replace("\n", " ") if metadata_desc else book_overview.replace("\n", " ").strip()
-        
-        if len(skill_description) > 500:
-            skill_description = skill_description[:497] + "..."
+
+        # Strip angle brackets (forbidden in description field)
+        skill_description = skill_description.replace("<", "").replace(">", "")
+
+        # Ensure the description has a trigger sentence
+        has_trigger = any(
+            phrase in skill_description
+            for phrase in ("Use this skill when", "使用此技能", "适用", "请使用此技能")
+        )
+        if not has_trigger:
+            trigger = f" Use this skill when the user asks about topics covered in '{book_title}'."
+            skill_description += trigger
+
+        # Truncate to 1000 chars (spec allows 1024; leave margin)
+        if len(skill_description) > 1000:
+            skill_description = skill_description[:997] + "..."
 
         index_file = self.output_dir / "SKILL.md"
         reference_lines = []

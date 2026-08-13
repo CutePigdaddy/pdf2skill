@@ -3,6 +3,7 @@ import ast
 import re
 import time
 import os
+import requests
 from config.config import config
 from utils.logger import logger, LLMParsingError
 from utils.retry_client import RetrySession
@@ -104,31 +105,112 @@ class LLMClient:
 
         Returns:
             The assistant's response text.
+
+        Raises:
+            LLMConnectionError: If the API endpoint cannot be reached.
+            ValueError: If the API returns an authentication or config error.
+            LLMParsingError: If the response format is unexpected.
         """
         if self.request_interval > 0:
             time.sleep(self.request_interval)
-            
+
         messages = [{"role": "user", "content": prompt}]
         tokens = max_tokens if max_tokens is not None else self.max_tokens
-        
+
         if is_json:
             if messages[0]["role"] != "system":
                 messages.insert(0, {"role": "system", "content": "You are a helpful assistant that MUST output only valid JSON. Do not include markdown code block markers in your raw response unless explicitly requested."})
-        
+
         payload = {
             "model": self.model,
             "messages": messages,
             "temperature": 0.3,
             "max_tokens": tokens
         }
-        
+
         if is_json:
             payload["response_format"] = {"type": "json_object"}
-        
+
         url = f"{self.base_url}/chat/completions"
         logger.debug(f"Sending request to provider={self.provider} model={self.model}")
-        resp = RetrySession.post(url, headers=self.headers, json=payload, timeout=self.timeout)
-        return resp.json()["choices"][0]["message"]["content"]
+
+        try:
+            resp = RetrySession.post(url, headers=self.headers, json=payload, timeout=self.timeout)
+        except requests.ConnectionError as e:
+            from utils.retry_client import LLMConnectionError, _diagnose_connection_error
+            diagnosis = _diagnose_connection_error(e, url)
+            logger.error(f"[{self.stage}] {diagnosis}")
+            raise LLMConnectionError(url, e) from e
+        except requests.HTTPError as e:
+            status = e.response.status_code if e.response is not None else "unknown"
+            if status == 401:
+                raise ValueError(
+                    f"[{self.stage}] API 认证失败 (HTTP 401) — "
+                    f"provider '{self.provider}' 的 API Key 无效或已过期。"
+                    f"请检查 .env 文件中的 API Key 配置。"
+                ) from e
+            if status == 403:
+                raise ValueError(
+                    f"[{self.stage}] API 访问被拒绝 (HTTP 403) — "
+                    f"provider '{self.provider}' 的 API Key 没有访问该模型的权限。"
+                    f"请检查 API Key 权限和模型名称 '{self.model}'。"
+                ) from e
+            if status == 404:
+                raise ValueError(
+                    f"[{self.stage}] API 端点不存在 (HTTP 404) — "
+                    f"base_url '{self.base_url}' 或 model '{self.model}' 可能不正确。"
+                ) from e
+            if status == 429:
+                raise ValueError(
+                    f"[{self.stage}] API 请求频率超限 (HTTP 429) — "
+                    f"provider '{self.provider}' 限流，请稍后重试或降低并发。"
+                ) from e
+            if status >= 500:
+                raise ValueError(
+                    f"[{self.stage}] LLM 服务端错误 (HTTP {status}) — "
+                    f"provider '{self.provider}' 服务异常，请稍后重试。"
+                ) from e
+            raise ValueError(
+                f"[{self.stage}] API 请求失败 (HTTP {status}): {e}"
+            ) from e
+        except requests.Timeout as e:
+            raise ValueError(
+                f"[{self.stage}] API 请求超时 ({self.timeout}s) — "
+                f"provider '{self.provider}' 响应过慢，可尝试增大 llm.timeout 配置。"
+            ) from e
+
+        # Parse response body
+        try:
+            body = resp.json()
+        except (json.JSONDecodeError, ValueError) as e:
+            raise LLMParsingError(
+                f"[{self.stage}] LLM 返回了非 JSON 响应体，无法解析。"
+                f"响应前 200 字符: {resp.text[:200]}"
+            ) from e
+
+        # Validate expected response structure
+        try:
+            content = body["choices"][0]["message"]["content"]
+        except (KeyError, IndexError, TypeError) as e:
+            # Check for common API error structures
+            if "error" in body:
+                err = body["error"]
+                err_msg = err.get("message", str(err)) if isinstance(err, dict) else str(err)
+                raise LLMParsingError(
+                    f"[{self.stage}] LLM API 返回错误: {err_msg}"
+                ) from e
+            raise LLMParsingError(
+                f"[{self.stage}] LLM 响应格式异常 — 缺少 choices[0].message.content。"
+                f"响应结构: {list(body.keys())}"
+            ) from e
+
+        if content is None:
+            raise LLMParsingError(
+                f"[{self.stage}] LLM 返回了空内容 (content=null)。"
+                f"模型 '{self.model}' 可能不支持该请求格式，或 max_tokens 过小。"
+            )
+
+        return content
 
     def parse_json_response(self, text: str) -> dict:
         """Extract a JSON object from an LLM response string.

@@ -55,7 +55,16 @@ def main():
         checkpoint = CheckpointManager(out_path)
         checkpoint.mark_stage_completed("pdf_conversion", {"md_file": args.input})
 
-    run_pipeline(args.input, args.output, from_stage=args.from_stage, restart=args.restart)
+    try:
+        run_pipeline(args.input, args.output, from_stage=args.from_stage, restart=args.restart)
+    except KeyboardInterrupt:
+        print("\n用户中断执行 (Ctrl+C) — 已保存的 checkpoint 数据不会丢失")
+        sys.exit(130)
+    except Exception as e:
+        # PDF2SkillsException subclasses print in the format the log parser expects
+        print(f"\n{type(e).__name__}: {e}")
+        sys.exit(1)
+
     print("\nPipeline finished successfully.")
 
 

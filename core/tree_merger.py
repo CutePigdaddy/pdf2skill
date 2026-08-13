@@ -373,42 +373,51 @@ Return ONLY the JSON object. No prose."""
         master_root = ChunkNode(id="master", title="Document", parent_path=[])
         self._peel_bar = tqdm(total=len(llm_chunks), desc="Peeling", unit="chunk", ncols=80)
 
-        for idx, c in enumerate(llm_chunks):
-            # Try to get the real title from content or fallback
-            title = "Document Section"
-            content = c["content"]
-            lines = content.strip().split('\n')
-            for line in lines:
-                header_match = re.search(r'^(#{1,6})\s+(.+)$', line)
-                if header_match:
-                    title = header_match.group(2).strip()
-                    break
+        try:
+            for idx, c in enumerate(llm_chunks):
+                # Try to get the real title from content or fallback
+                title = "Document Section"
+                content = c["content"]
+                lines = content.strip().split('\n')
+                for line in lines:
+                    header_match = re.search(r'^(#{1,6})\s+(.+)$', line)
+                    if header_match:
+                        title = header_match.group(2).strip()
+                        break
 
-            # Detect if this chunk should be atomic based on content patterns
-            is_atomic = c.get("is_atomic", False)
+                # Detect if this chunk should be atomic based on content patterns
+                is_atomic = c.get("is_atomic", False)
 
-            # Use LLM decision if available, only fallback to basic sanity check for TOC
-            if not is_atomic:
-                content_lower = content.lower()
-                # We only force atomic for very specific, non-content heavy headers if LLM didn't catch it
-                if re.search(r'^(#+)\s+(目录|table of contents|toc)$', content_lower, re.MULTILINE):
-                    is_atomic = True
-                    logger.info(f"  Fallback: Auto-detected TOC as ATOMIC for chunk {idx}")
+                # Use LLM decision if available, only fallback to basic sanity check for TOC
+                if not is_atomic:
+                    content_lower = content.lower()
+                    # We only force atomic for very specific, non-content heavy headers if LLM didn't catch it
+                    if re.search(r'^(#+)\s+(目录|table of contents|toc)$', content_lower, re.MULTILINE):
+                        is_atomic = True
+                        logger.info(f"  Fallback: Auto-detected TOC as ATOMIC for chunk {idx}")
 
-            node = ChunkNode(
-                id=self._generate_chunk_id(),
-                title=title,
-                parent_path=[],
-                content=content,
-                start_line=c.get("start_line", 0),
-                end_line=c.get("end_line", 0),
-                is_atomic=is_atomic
+                node = ChunkNode(
+                    id=self._generate_chunk_id(),
+                    title=title,
+                    parent_path=[],
+                    content=content,
+                    start_line=c.get("start_line", 0),
+                    end_line=c.get("end_line", 0),
+                    is_atomic=is_atomic
+                )
+
+                # Recurse into peeling for the node, but add directly to master children
+                peeled_nodes = self.recursive_peel(node)
+                master_root.children.extend(peeled_nodes)
+                self._peel_bar.update(1)
+        except KeyboardInterrupt:
+            self._peel_bar.close()
+            self._peel_bar = None
+            logger.warning(
+                f"用户中断 Peeling 阶段 (Ctrl+C) — "
+                f"已完成 {idx}/{len(llm_chunks)} 个 chunk"
             )
-
-            # Recurse into peeling for the node, but add directly to master children
-            peeled_nodes = self.recursive_peel(node)
-            master_root.children.extend(peeled_nodes)
-            self._peel_bar.update(1)
+            raise
 
         self._peel_bar.close()
         self._peel_bar = None
