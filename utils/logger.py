@@ -6,6 +6,18 @@ from config.config import config
 
 init(autoreset=True)
 
+# Force-enable Windows virtual terminal processing so ANSI colour codes
+# are rendered by the console.  Without this, Python 3.11+ on some
+# Windows versions leaves ENABLE_VIRTUAL_TERMINAL_PROCESSING off,
+# causing colorama codes to pass through as raw text.
+if sys.platform == "win32":
+    import ctypes
+    _kernel32 = ctypes.windll.kernel32
+    _handle = _kernel32.GetStdHandle(-11)  # STD_OUTPUT_HANDLE
+    _mode = ctypes.c_ulong()
+    if _kernel32.GetConsoleMode(_handle, ctypes.byref(_mode)):
+        _kernel32.SetConsoleMode(_handle, _mode.value | 0x0004)
+
 class ColoredFormatter(logging.Formatter):
     """Log formatter that adds ANSI colour codes based on log level."""
 
@@ -22,6 +34,30 @@ class ColoredFormatter(logging.Formatter):
         log_fmt = f"{self.COLORS.get(record.levelno, '')}%(asctime)s - %(name)s - %(levelname)s - %(message)s{Style.RESET_ALL}"
         formatter = logging.Formatter(log_fmt, datefmt="%Y-%m-%d %H:%M:%S")
         return formatter.format(record)
+
+
+class TqdmAwareStreamHandler(logging.StreamHandler):
+    """StreamHandler that uses ``tqdm.write()`` when a tqdm bar is active.
+
+    Without this, ``logger.info()`` calls during tqdm progress bars corrupt
+    the bar output — the log line splits the progress bar, causing it to
+    re-appear on every update.  ``tqdm.write()`` temporarily clears the bar,
+    prints the log line, then redraws the bar cleanly.
+
+    Colour codes from ``ColoredFormatter`` are preserved because they are
+    already embedded in the formatted string before ``tqdm.write()`` is called.
+    """
+
+    def emit(self, record):
+        try:
+            from tqdm import tqdm
+            if tqdm._instances:
+                msg = self.format(record)
+                tqdm.write(msg)
+                return
+        except ImportError:
+            pass
+        super().emit(record)
 
 def setup_logger(name="pdf2skills", log_level=logging.INFO):
     """Create and configure the application logger.
@@ -46,8 +82,8 @@ def setup_logger(name="pdf2skills", log_level=logging.INFO):
     logs_dir = Path(config.get("paths.logs_dir", "logs"))
     logs_dir.mkdir(parents=True, exist_ok=True)
     
-    # Console handler
-    ch = logging.StreamHandler(sys.stdout)
+    # Console handler (tqdm-aware to avoid progress bar corruption)
+    ch = TqdmAwareStreamHandler(sys.stdout)
     ch.setLevel(log_level)
     ch.setFormatter(ColoredFormatter())
     
@@ -128,4 +164,20 @@ class MinerUServiceError(MinerUAPIError):
 
 class LLMParsingError(PDF2SkillsException):
     """Raised when LLM returns unparseable or unexpected format"""
+    pass
+
+class PDFSplitError(PDF2SkillsException):
+    """Raised when PDF splitting fails (e.g. corrupted pages)"""
+    pass
+
+class LLMChunkingError(PDF2SkillsException):
+    """Raised when LLM chunking fails after all retries"""
+    pass
+
+class MergeError(PDF2SkillsException):
+    """Raised when tree merging fails"""
+    pass
+
+class SkillGenerationError(PDF2SkillsException):
+    """Raised when skill generation fails"""
     pass

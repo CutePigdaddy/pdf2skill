@@ -12,6 +12,7 @@ Usage:
 """
 
 import argparse
+import re
 import sys
 import time
 import shutil
@@ -24,6 +25,16 @@ if sys.platform == "win32":
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
     sys.stderr.reconfigure(encoding="utf-8", errors="replace")
 
+    # Force-enable Windows virtual terminal processing so ANSI colour
+    # codes are rendered by the console even when stdout is later
+    # replaced (e.g. by TeeWriter).
+    import ctypes
+    _kernel32 = ctypes.windll.kernel32
+    _handle = _kernel32.GetStdHandle(-11)  # STD_OUTPUT_HANDLE
+    _mode = ctypes.c_ulong()
+    if _kernel32.GetConsoleMode(_handle, ctypes.byref(_mode)):
+        _kernel32.SetConsoleMode(_handle, _mode.value | 0x0004)
+
 # Ensure project root is on sys.path
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
@@ -33,14 +44,20 @@ load_dotenv(PROJECT_ROOT / ".env")
 
 # -- Configuration -----------------------------------------------------------
 
-SOURCE_PDF = PROJECT_ROOT / "docs" / "pdfs" / "行业规范" / "宪法.pdf"
+SOURCE_PDF = PROJECT_ROOT / "docs" / "samples" / "行业规范" / "宪法.pdf"
 LOGS_DIR = Path(__file__).resolve().parent / "logs"
 
 
 # -- Logging helper: tee output to both console and log file -----------------
 
 class TeeWriter:
-    """Writes to both stdout and a log file simultaneously."""
+    """Writes to both stdout and a log file simultaneously.
+
+    ANSI colour codes are passed through to the terminal but stripped
+    from the log file so it stays plain-text readable.
+    """
+
+    _ANSI_RE = re.compile(r"\x1b\[[0-9;]*m")
 
     def __init__(self, log_path: Path):
         self._terminal = sys.stdout
@@ -48,7 +65,7 @@ class TeeWriter:
 
     def write(self, data):
         self._terminal.write(data)
-        self._log.write(data)
+        self._log.write(self._ANSI_RE.sub("", data))
         self._log.flush()
 
     def flush(self):
@@ -121,12 +138,22 @@ def main():
     sys.stdout = tee
 
     # Also redirect the pdf2skills logger to our tee so pipeline logs
-    # appear in the log file too
+    # appear in the log file too.  Use the ColoredFormatter so the
+    # console still shows colour; the TeeWriter strips ANSI codes
+    # when writing to the plain-text log file.
     import logging
-    from utils.logger import logger
-    file_handler = logging.StreamHandler(tee)
-    file_handler.setFormatter(logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s"))
-    logger.addHandler(file_handler)
+    from utils.logger import logger, ColoredFormatter
+
+    # Remove the original StreamHandler (it still points at the old
+    # sys.stdout which is now the TeeWriter, causing duplicates).
+    for h in logger.handlers[:]:
+        if isinstance(h, logging.StreamHandler) and not isinstance(h, logging.FileHandler):
+            logger.removeHandler(h)
+
+    tee_handler = logging.StreamHandler(tee)
+    tee_handler.setFormatter(ColoredFormatter())
+    tee_handler.setLevel(logging.INFO)
+    logger.addHandler(tee_handler)
 
     # -- Pre-flight checks ---------------------------------------------------
     banner(f"PDF2Skill E2E  [{ts_display}]")
@@ -308,9 +335,10 @@ def main():
             list_output_files(output_dir)
 
     except KeyboardInterrupt:
-        print("\n[INTERRUPTED] Pipeline stopped by user.")
+        print("\n[INTERRUPTED] 用户中断执行 (Ctrl+C)")
+        print("  已保存的 checkpoint 数据不会丢失，重新运行将从断点继续")
         tee.close()
-        sys.exit(0)
+        sys.exit(130)
     except Exception as e:
         print(f"\n[FAIL] Pipeline failed: {e}")
         import traceback
