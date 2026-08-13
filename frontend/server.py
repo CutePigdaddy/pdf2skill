@@ -6,6 +6,7 @@ Provides: config CRUD, input file listing, pipeline execution, output browsing.
 import json
 import os
 import re
+import requests
 import subprocess
 import sys
 import threading
@@ -15,7 +16,7 @@ from typing import Optional
 
 import yaml
 from dotenv import load_dotenv
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, UploadFile, File
 from fastapi.responses import FileResponse, HTMLResponse, PlainTextResponse
 from fastapi.staticfiles import StaticFiles
 
@@ -29,6 +30,10 @@ OUTPUTS_DIR = PROJECT_ROOT / "outputs"
 LOGS_DIR = PROJECT_ROOT / "logs"
 FRONTEND_DIR = Path(__file__).parent
 
+# Validation patterns for provider config (shared by config + apikey endpoints)
+PROVIDER_NAME_RE = re.compile(r"^[a-z0-9][a-z0-9_-]*$")
+ENV_VAR_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+
 app = FastAPI(title="pdf2skill")
 
 # ── Pipeline runner state ──────────────────────────────────────────
@@ -36,10 +41,33 @@ app = FastAPI(title="pdf2skill")
 _running = {}  # job_id -> {status, log_path, process}
 
 
+def _config_error(code: str, message: str, advice: str) -> HTTPException:
+    """Build a 422 with the structured {code, message, advice} error body."""
+    return HTTPException(422, detail={"ok": False, "error": {"code": code, "message": message, "advice": advice}})
+
+
 def _load_settings() -> dict:
-    """Read and return the current settings.yaml as a dict."""
-    with open(SETTINGS_PATH, "r", encoding="utf-8") as f:
-        return yaml.safe_load(f)
+    """Read and return the current settings.yaml as a dict.
+
+    Raises:
+        HTTPException: 500 with structured error if the file is missing
+            or the YAML is corrupt.
+    """
+    try:
+        with open(SETTINGS_PATH, "r", encoding="utf-8") as f:
+            return yaml.safe_load(f) or {}
+    except OSError as e:
+        raise HTTPException(500, detail={"ok": False, "error": {
+            "code": "SETTINGS_READ_FAILED",
+            "message": f"无法读取 config/settings.yaml: {e}",
+            "advice": "请检查文件是否存在且可读",
+        }})
+    except yaml.YAMLError as e:
+        raise HTTPException(500, detail={"ok": False, "error": {
+            "code": "SETTINGS_CORRUPT",
+            "message": f"config/settings.yaml 格式错误: {e}",
+            "advice": "请检查 YAML 语法（缩进、冒号）或从备份恢复",
+        }})
 
 
 def _save_settings(data: dict):
@@ -47,9 +75,21 @@ def _save_settings(data: dict):
 
     Args:
         data: Full settings dict to persist.
+
+    Raises:
+        HTTPException: 500 with structured error if the write fails.
     """
-    with open(SETTINGS_PATH, "w", encoding="utf-8") as f:
-        yaml.dump(data, f, default_flow_style=False, allow_unicode=True, sort_keys=False)
+    try:
+        tmp_path = SETTINGS_PATH.with_suffix(".yaml.tmp")
+        with open(tmp_path, "w", encoding="utf-8") as f:
+            yaml.dump(data, f, default_flow_style=False, allow_unicode=True, sort_keys=False)
+        os.replace(tmp_path, SETTINGS_PATH)  # atomic: never leave a half-written file
+    except OSError as e:
+        raise HTTPException(500, detail={"ok": False, "error": {
+            "code": "SETTINGS_WRITE_FAILED",
+            "message": f"无法写入 config/settings.yaml: {e}",
+            "advice": "请检查文件写入权限或磁盘空间",
+        }})
 
 
 # ── API Routes ─────────────────────────────────────────────────────
@@ -79,32 +119,253 @@ def get_config():
 
 @app.post("/api/config")
 def update_config(body: dict):
-    """Update settings.yaml with provided values."""
+    """Update settings.yaml with provided values.
+
+    Supports adding new providers (``llm.providers.<name>`` created if
+    missing), updating existing ones, and deleting via ``delete_providers``.
+    All changes are validated BEFORE anything is written — on error the
+    file is left untouched.
+
+    Args:
+        body: JSON with any of ``providers``, ``routers``,
+            ``delete_providers``, ``pdf``, ``mineru``.
+
+    Raises:
+        HTTPException: 422 with ``{code, message, advice}`` on validation
+            failure, 500 with structured error on read/write failure.
+    """
     current = _load_settings()
+    providers = current.setdefault("llm", {}).setdefault("providers", {})
+
+    # 1. Add / update providers (validated field by field)
     if "providers" in body:
         for name, cfg in body["providers"].items():
-            if name not in current.setdefault("llm", {}).setdefault("providers", {}):
-                current["llm"]["providers"][name] = {}
+            if not PROVIDER_NAME_RE.match(name):
+                raise _config_error(
+                    "INVALID_PROVIDER_NAME",
+                    f"Provider 名称 '{name}' 不合法",
+                    "名称只能包含小写字母、数字、下划线和连字符，且以字母或数字开头（如 my-provider）",
+                )
+            if name not in providers:
+                providers[name] = {}
             for k, v in cfg.items():
-                if k not in ("api_key_set", "api_key_preview"):
-                    current["llm"]["providers"][name][k] = v
+                if k in ("api_key_set", "api_key_preview"):
+                    continue  # mask fields from GET /api/config must not be written back
+                if k == "base_url":
+                    if not isinstance(v, str):
+                        raise _config_error("INVALID_BASE_URL", f"Provider '{name}' 的 base_url 必须是字符串",
+                                            "示例: https://api.example.com/v1")
+                    v = v.strip()
+                    if not v:
+                        raise _config_error("MISSING_BASE_URL", f"Provider '{name}' 的 base_url 不能为空",
+                                            "请在配置面板填写 base_url")
+                    if not v.startswith(("http://", "https://")):
+                        raise _config_error("INVALID_BASE_URL",
+                                            f"Provider '{name}' 的 base_url 必须以 http:// 或 https:// 开头",
+                                            "示例: https://api.example.com/v1")
+                elif k == "api_key_env":
+                    if not isinstance(v, str):
+                        raise _config_error("INVALID_ENV_VAR", f"Provider '{name}' 的 api_key_env 必须是字符串",
+                                            "环境变量名只能包含字母、数字、下划线，且以字母或下划线开头")
+                    v = v.strip()
+                    if not v:
+                        raise _config_error("MISSING_ENV_VAR", f"Provider '{name}' 的 api_key_env 不能为空",
+                                            "请在配置面板填写 API Key 环境变量名")
+                    if not ENV_VAR_RE.match(v):
+                        raise _config_error("INVALID_ENV_VAR",
+                                            f"Provider '{name}' 的 api_key_env '{v}' 不合法",
+                                            "环境变量名只能包含字母、数字、下划线，且以字母或下划线开头")
+                providers[name][k] = v
+
+    # 2. Validate router references before applying
+    if "routers" in body:
+        for stage, name in body["routers"].items():
+            if name and name not in providers:
+                raise _config_error("ROUTER_UNKNOWN_PROVIDER",
+                                    f"阶段 {stage} 引用了不存在的 Provider '{name}'",
+                                    "请选择配置中已有的 Provider")
+
+    # 3. Delete providers (blocked while referenced by any stage router)
+    if "delete_providers" in body:
+        routers = current["llm"].setdefault("routers", {})
+        for name in body["delete_providers"]:
+            if name not in providers:
+                continue  # already absent — nothing to do
+            used_by = [stage for stage, p in routers.items() if p == name]
+            if used_by:
+                raise _config_error("PROVIDER_IN_USE",
+                                    f"Provider '{name}' 正被阶段 {', '.join(used_by)} 使用，无法删除",
+                                    "请先在阶段卡片中将对应阶段切换到其他 Provider")
+            if len(providers) <= 1:
+                raise _config_error("LAST_PROVIDER",
+                                    f"无法删除最后一个 Provider '{name}'",
+                                    "至少保留一个 Provider")
+            del providers[name]
+
     if "routers" in body:
         current["llm"]["routers"] = body["routers"]
     if "pdf" in body:
         current.setdefault("pdf", {}).update(body["pdf"])
     if "mineru" in body:
         current.setdefault("mineru", {}).update(body["mineru"])
+
     _save_settings(current)
     return {"ok": True}
 
 
+@app.get("/api/models")
+def list_models(provider: str = ""):
+    """Fetch available model names for an LLM provider.
+
+    Calls the OpenAI-compatible ``GET {base_url}/models`` endpoint with
+    a short timeout and no retries (interactive UI call — RetrySession's
+    exponential backoff would stall the button for minutes).
+
+    Args:
+        provider: Provider name from settings.yaml ``llm.providers``.
+
+    Returns:
+        Dict ``{ok, provider, models, count}`` on success, or
+        ``{ok: False, error: {code, message, advice}}`` on failure.
+        Errors use HTTP 200 so the frontend can show the structured
+        ``code/message/advice`` display (matching the upload error card).
+    """
+    data = _load_settings()
+    providers = data.get("llm", {}).get("providers", {})
+
+    if not provider or provider not in providers:
+        return {
+            "ok": False,
+            "error": {
+                "code": "UNKNOWN_PROVIDER",
+                "message": f"未知 Provider: {provider}",
+                "advice": "请检查配置面板中的 Provider 名称",
+            },
+        }
+
+    cfg = providers[provider]
+    base_url = cfg.get("base_url", "")
+    if not base_url:
+        return {
+            "ok": False,
+            "error": {
+                "code": "NO_BASE_URL",
+                "message": f"Provider '{provider}' 缺少 base_url",
+                "advice": "请在 config/settings.yaml 中为该 Provider 配置 base_url",
+            },
+        }
+
+    # Same key resolution order as utils/llm_client.py
+    provider_key_env = f"{provider.upper().replace('-', '_')}_API_KEY"
+    api_key = os.getenv(provider_key_env) or os.getenv(cfg.get("api_key_env", ""))
+    if not api_key:
+        return {
+            "ok": False,
+            "error": {
+                "code": "NO_API_KEY",
+                "message": f"Provider '{provider}' 未设置 API Key",
+                "advice": "请在「配置」面板 API Keys 区设置，或在 .env 中配置后重启服务",
+            },
+        }
+
+    url = f"{base_url.rstrip('/')}/models"
+    try:
+        resp = requests.get(
+            url,
+            headers={"Authorization": f"Bearer {api_key}"},
+            timeout=(5, 12),  # connect 5s / read 12s
+        )
+    except requests.ConnectionError:
+        return {
+            "ok": False,
+            "error": {
+                "code": "CONNECT_FAILED",
+                "message": f"无法连接 {base_url}",
+                "advice": "请检查网络连接、代理/VPN 设置，或该服务是否正在运行",
+            },
+        }
+    except requests.Timeout:
+        return {
+            "ok": False,
+            "error": {
+                "code": "CONNECT_FAILED",
+                "message": f"请求 {base_url} 超时",
+                "advice": "网络响应过慢，请稍后重试或检查网络",
+            },
+        }
+    except requests.RequestException as e:
+        return {
+            "ok": False,
+            "error": {
+                "code": "CONNECT_FAILED",
+                "message": f"请求失败: {e}",
+                "advice": "请检查网络连接后重试",
+            },
+        }
+
+    if resp.status_code == 401:
+        return {
+            "ok": False,
+            "error": {
+                "code": "AUTH_FAILED",
+                "message": f"Provider '{provider}' API Key 认证失败",
+                "advice": "请在「配置」面板重新设置 API Key",
+            },
+        }
+    if resp.status_code == 404:
+        return {
+            "ok": False,
+            "error": {
+                "code": "ENDPOINT_NOT_FOUND",
+                "message": f"Provider '{provider}' 不支持 /models 端点",
+                "advice": "该 Provider 无法获取模型列表，请手动输入模型名称",
+            },
+        }
+    if resp.status_code != 200:
+        return {
+            "ok": False,
+            "error": {
+                "code": "UPSTREAM_ERROR",
+                "message": f"上游返回 HTTP {resp.status_code}",
+                "advice": "请稍后重试，或手动输入模型名称",
+            },
+        }
+
+    try:
+        raw_models = resp.json().get("data", [])
+        models = sorted({m["id"] for m in raw_models if isinstance(m, dict) and m.get("id")})
+    except (ValueError, TypeError, KeyError, AttributeError):
+        return {
+            "ok": False,
+            "error": {
+                "code": "PARSE_FAILED",
+                "message": "无法解析模型列表响应",
+                "advice": "该 Provider 的响应格式与预期不符，请手动输入模型名称",
+            },
+        }
+
+    models = models[:200]  # keep the payload reasonable
+    return {"ok": True, "provider": provider, "models": models, "count": len(models)}
+
+
 @app.post("/api/apikey")
 def set_apikey(body: dict):
-    """Set an API key as an environment variable (in-memory only)."""
+    """Set an API key as an environment variable (in-memory only).
+
+    Raises:
+        HTTPException: 400 if fields missing, 422 with structured error
+            if ``env_var`` is not a valid environment variable name.
+    """
     env_var = body.get("env_var", "")
     value = body.get("value", "")
     if not env_var or not value:
         raise HTTPException(400, "env_var and value required")
+    if not ENV_VAR_RE.match(env_var):
+        raise _config_error(
+            "INVALID_ENV_VAR",
+            f"环境变量名 '{env_var}' 不合法",
+            "环境变量名只能包含字母、数字、下划线，且以字母或下划线开头",
+        )
     os.environ[env_var] = value
     return {"ok": True}
 
@@ -128,6 +389,78 @@ def list_inputs():
                 "size": f.stat().st_size,
             })
     return {"files": files}
+
+
+@app.post("/api/upload")
+async def upload_pdf(file: UploadFile = File(...)):
+    """Upload a PDF file to the inputs/ directory after validation.
+
+    Accepts a single PDF via multipart form-data.  The file is validated
+    (format, size, page count, corruption, encryption) before saving.
+
+    Returns:
+        Dict with ``ok`` and ``file`` info on success.
+
+    Raises:
+        HTTPException: 422 on validation failure, 409 on name conflict.
+    """
+    from pdf_validator import validate_pdf, sanitize_filename
+
+    file_bytes = await file.read()
+    filename = file.filename or ""
+
+    # Validate
+    settings = _load_settings()
+    error = validate_pdf(file_bytes, filename, settings)
+    if error:
+        raise HTTPException(422, detail={"ok": False, "error": error})
+
+    # Sanitize and save
+    safe_name = sanitize_filename(filename)
+    target = INPUTS_DIR / safe_name
+    if target.exists():
+        raise HTTPException(409, detail={
+            "ok": False,
+            "error": {
+                "code": "NAME_CONFLICT",
+                "message": f"文件 {safe_name} 已存在",
+                "advice": "请重命名文件后重新上传，或删除已有文件",
+            },
+        })
+
+    INPUTS_DIR.mkdir(parents=True, exist_ok=True)
+    target.write_bytes(file_bytes)
+
+    return {
+        "ok": True,
+        "file": {
+            "name": safe_name,
+            "size": len(file_bytes),
+            "relative": safe_name,
+        },
+    }
+
+
+@app.delete("/api/inputs/{filename}")
+def delete_input(filename: str):
+    """Delete a file from the inputs/ directory.
+
+    Args:
+        filename: Name of the file to delete.
+
+    Returns:
+        Dict with ``ok`` on success.
+
+    Raises:
+        HTTPException: 404 if not found, 403 if path escapes inputs/.
+    """
+    target = (INPUTS_DIR / filename).resolve()
+    if not target.is_relative_to(INPUTS_DIR.resolve()):
+        raise HTTPException(403, "Path traversal not allowed")
+    if not target.exists() or not target.is_file():
+        raise HTTPException(404, f"File not found: {filename}")
+    target.unlink()
+    return {"ok": True}
 
 
 @app.post("/api/run")
@@ -259,7 +592,7 @@ def get_status(job_id: Optional[str] = None):
         mineru_progress = _parse_mineru_progress(log_content)
 
         # Parse MinerU structured error from log
-        mineru_error = _parse_mineru_error(log_content)
+        mineru_error = _parse_pipeline_error(log_content)
 
         return {
             "job_id": job_id,
@@ -270,6 +603,7 @@ def get_status(job_id: Optional[str] = None):
             "log": log_content,
             "mineru_progress": mineru_progress,
             "mineru_error": mineru_error,
+            "pipeline_error": mineru_error,
         }
 
     jobs = [{"job_id": jid, "status": info["status"]} for jid, info in _running.items()]
@@ -287,11 +621,18 @@ def _parse_mineru_progress(log_text: str):
         return None
 
 
-def _parse_mineru_error(log_text: str):
-    """Extract MinerU error info from log text (err_code + Chinese message)."""
-    # Match MinerUAPIError output: "MinerUAPIError: <zh_msg> — <advice>"
+def _parse_pipeline_error(log_text: str):
+    """Extract structured error info from log text (any pipeline stage).
+
+    Matches all ``PDF2SkillsException`` subclasses and extracts the
+    Chinese message and advice in the ``"消息 — 建议"`` format.
+    """
     err_match = re.search(
-        r'MinerU(?:Auth|File|Size|Quota|Service)?Error:\s*(.+?)(?:\n|$)',
+        r'(?:MinerU(?:Auth|File|Size|Quota|Service)?Error'
+        r'|MinerUAPIError|MinerUConversionError'
+        r'|PDF2SkillsException'
+        r'|PDFSplitError|LLMChunkingError|SkillGenerationError|MergeError'
+        r'|LLMParsingError):\s*(.+?)(?:\n|$)',
         log_text,
     )
     if not err_match:
@@ -406,7 +747,7 @@ def read_output_file(path: str = ""):
     if not path:
         raise HTTPException(400, "path query param required")
     target = (OUTPUTS_DIR / path).resolve()
-    if not str(target).startswith(str(OUTPUTS_DIR.resolve())):
+    if not target.is_relative_to(OUTPUTS_DIR.resolve()):
         raise HTTPException(403, "Access denied")
     if not target.exists():
         raise HTTPException(404, "File not found")
