@@ -41,14 +41,10 @@ condensed-matter-physics/
 EY/
 
 # ── Docs with large binaries ──────────────────────────────────────
-docs/pdfs/
+docs/samples/
 
 # ── Ad-hoc scripts (not part of core project) ─────────────────────
-debug_chunks.py
-fix_skill.py
-test_gradio_mineru.py
-test_llm_api.py
-extract_md.py
+scripts/
 
 # ── Misc generated files ──────────────────────────────────────────
 *.pdf
@@ -61,7 +57,7 @@ still_tracked.txt
 tracked_files.txt
 
 # ── Reference docs (external, not project source) ─────────────────
-MinerU-*.md
+docs/api/
 
 # ── Frontend runtime artifacts ────────────────────────────────────
 frontend/screenshot_*.png
