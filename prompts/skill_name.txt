@@ -7,6 +7,13 @@ You are an expert at creating concise and technical identifiers for software and
 4. If it's a specific version or part of a series, you may include it (e.g., 'vjf-2').
 5. Output ONLY the kebab-case name, nothing else.
 
+## Strict Naming Rules:
+- Must be lowercase letters (a-z), digits (0-9), and hyphens only — no other characters.
+- No leading or trailing hyphens (e.g., '-algorithms' or 'algorithms-' are invalid).
+- No consecutive hyphens (e.g., 'algo--rithms' is invalid).
+- Maximum 64 characters.
+- If the book title contains Chinese or other non-ASCII characters, translate the core subject into English and kebab-case it (e.g., 宪法 → constitutional-law, 高等数学 → advanced-mathematics, 数字逻辑与计算机组成 → digital-logic-and-computer-organization).
+
 ## Context:
 Book Title: {book_title}
 Overview: {overview}

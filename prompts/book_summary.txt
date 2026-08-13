@@ -2,27 +2,42 @@ You are an expert curriculum designer. Given the Table of Contents of a textbook
 
 Your output will be used in two places:
 1. **The 'Overview' Section**: A clear, instructional guide for users.
-2. **The Metadata 'Description'**: A concise, 1-2 sentence summary for AI indexing.
+2. **The Metadata 'Description'**: A concise, 1-2 sentence summary for AI skill triggering.
 
 ## Internal Goal
 Your primary goal is to provide a concise, structured index for an AI model to navigate this textbook's knowledge. The generated "Claude Code Skill" should be an efficient knowledge anchor.
 
 ## Your Task
-1. Write a **concise one-paragraph overview** (max 3-5 sentences). It should state what this knowledge index is and the core technical domains it covers. 
+1. Write a **concise one-paragraph overview** (max 3-5 sentences). It should state what this knowledge index is and the core technical domains it covers.
    - DO NOT include lengthy paragraphs, usage scenarios, or historical background.
    - Keep it short enough to serve as a high-density reference intro.
+   - DO NOT include any markdown headings (# or ##) in the overview. Write only plain text paragraphs.
    - **LANGUAGE RULE**: Identify the language of the provided Table of Contents. If it is in Chinese, write the overview and metadata in Chinese. If it is in English, write them in English.
 
 2. At the VERY END of your response, provide the metadata description inside a special tag.
-   **CRITICAL RULE for METADATA_DESC**: This field is the MOST IMPORTANT for AI indexing. It MUST be descriptive, keyword-rich, and cover the **MAJOR KNOWLEDGE POINTS** found in the Table of Contents.
-   - Do NOT use generic phrases like "A guide to {book_title}".
-   - DO list the top 5-10 core technical topics, specific algorithms, or mathematical concepts (e.g., 'Master Theorem', 'RSA Cryptosystem', 'Graph Theory', 'Probability Hashing').
-   - Mention the specific types of content available (e.g., 'mathematical proofs', 'pseudocode', 'step-by-step exercises').
-   - Format: [METADATA_DESC: Comprehensive Knowledge Index for '{book_title}'. Covers [Topic A], [Topic B], and [Topic C]. Includes [X], [Y], and [Z]. Use this skill when the user requires authoritative technical details, specific algorithms, or exercises from this textbook.]
+   **CRITICAL RULE for METADATA_DESC**: This field is the MOST IMPORTANT for AI skill triggering. It MUST be concise, keyword-rich, and explicitly state when to use this skill. Keep it under 200 words (approximately 800 characters).
+
+   A good METADATA_DESC follows this structure:
+   - State the core subject in 1-2 phrases
+   - List 5-8 of the most important topics/concepts
+   - End with a "Use this skill when..." trigger sentence
+
+   **For English content**, format like:
+   [METADATA_DESC: Covers [Topic A], [Topic B], [Topic C], and related concepts in [Domain]. Includes [content types, e.g., proofs, exercises, pseudocode]. Use this skill when the user asks about [specific topics] or needs technical details from this textbook.]
+
+   **For Chinese content**, format like:
+   [METADATA_DESC: 涵盖[主题A]、[主题B]、[主题C]等[领域]核心知识。包含[内容类型，如：定理证明、习题、代码示例]。当用户询问[具体主题]或需要本教材的技术细节时，请使用此技能。]
+
+   Rules:
+   - Do NOT use generic phrases like "A guide to {book_title}" or "Comprehensive Knowledge Index for..."
+   - DO list specific topics and concepts (e.g., 'Master Theorem', 'RSA Cryptosystem', not just 'Cryptography')
+   - DO mention content types (e.g., 'mathematical proofs', 'pseudocode', 'step-by-step exercises')
+   - DO NOT use angle brackets (< or >) anywhere in the output — they break the skill format.
+   - The "Use this skill when..." / "当用户询问...时，请使用此技能" trigger sentence is REQUIRED at the end.
 
 ## Table of Contents
 {toc}
 
 ## Output Format
-- Clear Markdown for the main overview.
+- Plain text paragraphs for the main overview (no markdown headings).
 - The [METADATA_DESC: ...] tag on the last line.
