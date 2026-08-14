@@ -36,7 +36,7 @@ load_dotenv(PROJECT_ROOT / ".env")
 
 # -- Configuration -----------------------------------------------------------
 
-SOURCE_PDF = PROJECT_ROOT / "docs" / "pdfs" / "行业规范" / "TCP行业规范.pdf"
+SOURCE_PDF = PROJECT_ROOT / "docs" / "samples" / "行业规范" / "TCP行业规范.pdf"
 LOGS_DIR = Path(__file__).resolve().parent / "logs"
 
 MINERU_BASE_URL = "https://mineru.net/api/v4"

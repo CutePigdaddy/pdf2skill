@@ -77,7 +77,7 @@ def validate_pdf(file_bytes: bytes, filename: str, settings: dict) -> Optional[d
             "advice": "请确保上传真正的 PDF 文件，而非重命名的其他格式",
         }
 
-    # 7. PDF parseability (slowest check — requires full cross-ref parse)
+    # 8. PDF parseability (slowest check — requires full cross-ref parse)
     try:
         reader = PdfReader(io.BytesIO(file_bytes))
     except Exception:
@@ -87,16 +87,10 @@ def validate_pdf(file_bytes: bytes, filename: str, settings: dict) -> Optional[d
             "advice": "请尝试用 PDF 阅读器打开确认文件完整性，或重新导出 PDF",
         }
 
-    # 8. Page count limit
-    page_limit = settings.get("pdf", {}).get("page_limit", 200)
-    page_count = len(reader.pages)
-    if page_count > page_limit:
-        return {
-            "code": "PAGE_EXCEED",
-            "message": f"PDF 页数超过限制（当前 {page_count} 页，上限 {page_limit} 页）",
-            "advice": "请在配置中调高页数限制，或拆分文件后重新上传",
-        }
-
+    # No page-count rejection here on purpose: the remote pipeline splits
+    # over-limit PDFs automatically (_split_pdf_if_needed), so blocking
+    # them at upload would make that feature unreachable.  MinerU's own
+    # per-file limits are enforced during processing.
     # 9. Encrypted PDF
     if reader.is_encrypted:
         return {

@@ -556,8 +556,12 @@ def start_pipeline(body: dict):
     def _watch(pid, jid):
         pid.wait()
         if jid in _running:
-            _running[jid]["status"] = "done" if pid.returncode == 0 else "failed"
-            _running[jid]["returncode"] = pid.returncode
+            # Only update the terminal status if the job wasn't stopped
+            # manually — stop_pipeline() already set it to "stopped" and
+            # terminate() would otherwise surface as a bogus "failed".
+            if _running[jid]["status"] == "running":
+                _running[jid]["status"] = "done" if pid.returncode == 0 else "failed"
+                _running[jid]["returncode"] = pid.returncode
             try:
                 _running[jid]["log_fd"].close()
             except Exception:

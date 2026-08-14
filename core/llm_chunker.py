@@ -124,16 +124,32 @@ class LLMChunker:
             ``content``, and ``is_atomic`` keys.
         """
         lines = split_data["lines"]
-        splits = sorted(set([1] + split_data.get("splits", []) + [len(lines) + 1]))
-        
-        # Use toc_range from LLM if provided
+        total = len(lines)
+
+        # Sanitize LLM-provided split points: they must be integers inside
+        # the document's line range.  A malformed plan (strings, negatives,
+        # out-of-range values) must not crash this stage.
+        valid_splits = []
+        for s in split_data.get("splits", []):
+            try:
+                s_int = int(s)
+            except (TypeError, ValueError):
+                continue
+            if 1 <= s_int <= total:
+                valid_splits.append(s_int)
+        splits = sorted(set([1] + valid_splits + [total + 1]))
+
+        # Use toc_range from LLM if provided (only force ATOMIC for the TOC
+        # range; other "atomic" sections like Exercises/Appendix still need
+        # peeling when too large).
         toc_range = split_data.get("toc_range", None)
-        
-        # Get atomic ranges (Exercises, Appendix, References, etc.)
-        # These are used as informational metadata but we only force ATOMIC for TOC,
-        # otherwise we loose the ability to peel through large sections containing exercises.
-        toc_range = split_data.get("toc_range", None)
-        
+        toc_bounds = None
+        if toc_range and isinstance(toc_range, list) and len(toc_range) >= 2:
+            try:
+                toc_bounds = (int(toc_range[0]), int(toc_range[1]))
+            except (TypeError, ValueError):
+                logger.warning(f"Ignoring malformed toc_range from LLM: {toc_range}")
+
         chunks = []
         for i in range(len(splits) - 1):
             start = splits[i]
@@ -141,16 +157,13 @@ class LLMChunker:
             chunk_content = "\n".join(lines[start-1:end])
             if chunk_content.strip():
                 is_atomic = False
-                
-                # We ONLY force atomic for the Table of Contents range.
-                # Other sections like Exercises/Appendix returned by LLM are "atomic" 
-                # in a logical sense but often need peeling if they are too large.
-                if toc_range and isinstance(toc_range, list) and len(toc_range) >= 2:
-                    toc_start, toc_end = int(toc_range[0]), int(toc_range[1])
+
+                if toc_bounds:
+                    toc_start, toc_end = toc_bounds
                     if start >= toc_start and end <= toc_end:
                         is_atomic = True
                         logger.info(f"Marked chunk (lines {start}-{end}) as ATOMIC (TOC range)")
-                
+
                 chunks.append({
                     "start_line": start,
                     "end_line": end,

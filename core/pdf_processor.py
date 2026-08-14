@@ -68,7 +68,9 @@ class RemoteMinerUProcessor:
             "Authorization": f"Bearer {self.api_key}",
             "Content-Type": "application/json"
         }
-        self.page_limit = config.get("pdf.page_limit", 600)
+        # Split threshold — must match the settings.yaml default
+        # (pdf.page_limit) so validator and splitter agree.
+        self.page_limit = config.get("pdf.page_limit", 200)
         self.progress_callback = None
         self._bar = None
 
@@ -346,7 +348,13 @@ class RemoteMinerUProcessor:
             MinerUConversionError: If no Markdown file is found in the archive.
         """
         logger.info("Downloading and extracting results...")
-        resp = RetrySession.get(zip_url, timeout=120)
+        try:
+            resp = RetrySession.get(zip_url, timeout=120)
+        except requests.Timeout as e:
+            # Large result archives can exceed the read timeout on slow
+            # links; RetrySession does not retry Timeout, so surface a
+            # friendly error instead of a raw exception.
+            raise MinerUConversionError(f"下载 MinerU 结果文件超时，请检查网络后重试: {e}") from e
         output_dir.mkdir(parents=True, exist_ok=True)
 
         zip_path = output_dir / "remote_mineru_output.zip"

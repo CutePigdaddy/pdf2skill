@@ -31,16 +31,24 @@ class SkillEngine:
         self.name_prompt = (self.prompts_dir / "skill_name.txt").read_text(encoding="utf-8")
 
     def _collect_flat_nodes(self, node: ChunkNode) -> list[ChunkNode]:
-        """Flatten the chunk tree into a flat list of non-root nodes.
+        """Flatten the chunk tree into a flat list of leaf nodes.
+
+        Only leaf chunks (no children) become reference files / index
+        entries; intermediate nodes live in tree.json and the
+        ``parent_path`` metadata of each leaf.
 
         Args:
             node: Root ChunkNode to traverse.
 
         Returns:
-            List of all ChunkNode objects (excluding master/root).
+            List of all leaf ChunkNode objects (excluding master/root).
         """
         nodes = []
-        if getattr(node, 'id', None) and node.id not in ("master", "root"):
+        if (
+            getattr(node, 'id', None)
+            and node.id not in ("master", "root")
+            and not node.children
+        ):
             nodes.append(node)
         for child in getattr(node, 'children', []):
             nodes.extend(self._collect_flat_nodes(child))
@@ -126,10 +134,14 @@ class SkillEngine:
             
         all_nodes = self._collect_flat_nodes(root_node)
 
+        # Build Table of Contents preview for context.  Computed before
+        # the overview branch so it also exists on resume when the
+        # book_overview stage is already checkpointed (otherwise the
+        # skill-name stage below would hit a NameError on re-run).
+        toc_lines = [f"{'  ' * len(n.parent_path)}- {n.title}" for n in all_nodes]
+
         # 1. Book Overview Generation
         if not checkpoint.is_stage_completed("book_overview"):
-            # Build Table of Contents preview for context
-            toc_lines = [f"{'  ' * len(n.parent_path)}- {n.title}" for n in all_nodes]
             toc_text = "\n".join(toc_lines)
             
             book_overview_prompt = self.book_prompt.format(book_title=book_title, toc=toc_text[:4000])

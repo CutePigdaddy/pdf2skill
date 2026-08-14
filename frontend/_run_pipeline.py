@@ -34,15 +34,22 @@ def main():
     from main import run_pipeline
     from utils.checkpoint import CheckpointManager
 
-    # Add a DEBUG-level handler so __MINERU_PROGRESS__ markers (emitted at
-    # debug level to avoid console clutter) still reach the frontend's
-    # subprocess log file via stdout capture.
+    # Ensure DEBUG-level output reaches stdout so __MINERU_PROGRESS__
+    # markers (emitted at debug level to avoid console clutter) are
+    # captured in the subprocess log for the frontend.  Lower the level
+    # of the existing console handler instead of adding a second one —
+    # a second handler would print every INFO+ line twice.
     import logging
     from utils.logger import logger
-    debug_handler = logging.StreamHandler(sys.stdout)
-    debug_handler.setLevel(logging.DEBUG)
-    debug_handler.setFormatter(logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s"))
-    logger.addHandler(debug_handler)
+    console_handlers = [h for h in logger.handlers if isinstance(h, logging.StreamHandler)]
+    if console_handlers:
+        for h in console_handlers:
+            h.setLevel(logging.DEBUG)
+    else:
+        debug_handler = logging.StreamHandler(sys.stdout)
+        debug_handler.setLevel(logging.DEBUG)
+        debug_handler.setFormatter(logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s"))
+        logger.addHandler(debug_handler)
 
     print(f"Input: {args.input}")
     print(f"Output: {args.output}")

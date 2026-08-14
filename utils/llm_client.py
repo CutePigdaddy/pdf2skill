@@ -91,7 +91,13 @@ class LLMClient:
             "Content-Type": "application/json"
         }
         self.timeout = config.get("llm.timeout", 120)
-        self.request_interval = float(os.getenv("REQUEST_INTERVAL", config.get("llm.request_interval", 0.0)))
+        # REQUEST_INTERVAL env wins; otherwise read llm.request_interval,
+        # falling back to the legacy pdf.request_interval key that the
+        # config UI still writes.
+        self.request_interval = float(os.getenv(
+            "REQUEST_INTERVAL",
+            config.get("llm.request_interval", config.get("pdf.request_interval", 0.0)),
+        ))
         logger.info(f"Initialized LLMClient [{self.stage}] -> provider: {self.provider}, model: {self.model}, base_url: {self.base_url}, interval: {self.request_interval}s")
 
     def chat(self, prompt: str, is_json: bool = False, max_tokens: int = None) -> str:

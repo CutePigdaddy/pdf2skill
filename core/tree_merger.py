@@ -406,9 +406,12 @@ Return ONLY the JSON object. No prose."""
                     is_atomic=is_atomic
                 )
 
-                # Recurse into peeling for the node, but add directly to master children
-                peeled_nodes = self.recursive_peel(node)
-                master_root.children.extend(peeled_nodes)
+                # Recurse into peeling for the node, then attach the node
+                # itself (not just its peeled leaves) so the master tree
+                # keeps the intermediate hierarchy.  The flat leaf files
+                # are derived from the tree in save_results().
+                self.recursive_peel(node)
+                master_root.children.append(node)
                 self._peel_bar.update(1)
         except KeyboardInterrupt:
             self._peel_bar.close()
@@ -495,8 +498,12 @@ tokens: ~{self.estimate_tokens(chunk.content)}
         flat_chunks = []
 
         def collect_chunks(node: ChunkNode):
-            if node.id not in {"root", "master"}:
+            # Only leaf nodes are written as flat chunk files — the
+            # intermediate hierarchy is preserved in tree.json and in
+            # the parent_path metadata of each leaf.
+            if node.id not in {"root", "master"} and not node.children:
                 flat_chunks.append(node)
+                return
             for child in node.children:
                 collect_chunks(child)
 

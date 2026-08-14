@@ -1,4 +1,5 @@
 import json
+import os
 from pathlib import Path
 from utils.logger import logger
 
@@ -42,11 +43,18 @@ class CheckpointManager:
         return {"version": CHECKPOINT_VERSION, "completed_stages": [], "data": {}}
 
     def save(self):
-        """Persist current checkpoint state to disk."""
+        """Persist current checkpoint state to disk.
+
+        Writes to a temp file and atomically replaces the checkpoint so
+        a crash mid-write cannot corrupt it (matching the atomic write
+        used for settings.yaml in the frontend server).
+        """
         self.output_dir.mkdir(parents=True, exist_ok=True)
         self.state["version"] = CHECKPOINT_VERSION
-        with open(self.checkpoint_file, 'w', encoding='utf-8') as f:
+        tmp_file = self.checkpoint_file.with_suffix(".json.tmp")
+        with open(tmp_file, 'w', encoding='utf-8') as f:
             json.dump(self.state, f, ensure_ascii=False, indent=2)
+        os.replace(tmp_file, self.checkpoint_file)
             
     def mark_stage_completed(self, stage_name: str, stage_data: dict = None):
         """Record a pipeline stage as completed and persist.
