@@ -2,6 +2,9 @@ import type { StageKey } from './errors';
 
 export type StageName = 'pdf_conversion' | 'llm_chunking' | 'tree_merging' | 'skill_generation';
 
+/** Stages a run can be restarted from (Stage 4 has its own fine-grained checkpoint). */
+export type ResettableStage = 'pdf_conversion' | 'llm_chunking' | 'tree_merging';
+
 // ── LLM provider registry (mirrors settings.yaml llm.providers) ────
 
 export interface ProviderConfig {
@@ -85,7 +88,7 @@ export type RunInput =
   | { kind: 'markdown'; file: File | Blob; name: string };
 
 export interface RunOptions {
-  fromStage?: StageName;
+  fromStage?: ResettableStage;
   restart?: boolean;
   /** External abort signal (equivalent to calling Pdf2Skill.abort()). */
   signal?: AbortSignal;

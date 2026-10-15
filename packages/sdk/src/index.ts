@@ -17,6 +17,7 @@ export type {
   LogEvent,
   Pdf2SkillEvents,
   StageName,
+  ResettableStage,
 } from './types';
 export { defaultConfig, mergeConfig, loadStoredConfig, saveStoredConfig, validateConfig } from './config';
 export type { ConfigIssue } from './config';

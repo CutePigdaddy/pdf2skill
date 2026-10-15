@@ -46,23 +46,34 @@ function isPlainObject(v: unknown): v is Record<string, unknown> {
   return typeof v === 'object' && v !== null && !Array.isArray(v);
 }
 
-/** Deep-merge a partial config onto the defaults (arrays and scalars replaced). */
-export function mergeConfig(base: Pdf2SkillConfig, patch: unknown): Pdf2SkillConfig {
+/** Dynamic key read for plain-data merges (typed objects have no index signature). */
+function getProp(obj: object, key: string): unknown {
+  return Reflect.get(obj, key);
+}
+
+/**
+ * Deep-merge a partial config onto the defaults (arrays and scalars replaced).
+ * Generic so nested config sections merge through the same code path.
+ */
+export function mergeConfig<T extends object>(base: T, patch: unknown): T {
   if (!isPlainObject(patch)) return base;
-  const out: Record<string, unknown> = { ...base };
+  const out: T = Object.assign({}, base);
   for (const [k, v] of Object.entries(patch)) {
-    const cur = (base as unknown as Record<string, unknown>)[k];
+    if (v === undefined) continue;
     if (k === 'providers' && isPlainObject(v)) {
       // The provider registry is replace-only: deletions (remove provider)
       // and import-from-server must be expressible, which key-merge forbids.
-      out[k] = v;
-    } else if (isPlainObject(v) && isPlainObject(cur)) {
-      out[k] = mergeConfig(cur as never, v);
-    } else if (v !== undefined) {
-      out[k] = v;
+      Object.assign(out, { providers: v });
+      continue;
+    }
+    const cur = getProp(base, k);
+    if (isPlainObject(v) && isPlainObject(cur)) {
+      Object.assign(out, { [k]: mergeConfig(cur, v) });
+    } else {
+      Object.assign(out, { [k]: v });
     }
   }
-  return out as unknown as Pdf2SkillConfig;
+  return out;
 }
 
 export function loadStoredConfig(): Pdf2SkillConfig | null {

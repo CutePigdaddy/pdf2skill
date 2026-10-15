@@ -1,10 +1,10 @@
 import { Pdf2Skill, isPdf2SkillError } from '@pdf2skill/sdk';
-import type { StageEvent } from '@pdf2skill/sdk';
+import type { ResettableStage, StageEvent } from '@pdf2skill/sdk';
 import { $, escapeHtml, errInfoOf, showToast } from '../ui/dom';
 
 const STAGE_KEYS = ['mineru', 'chunking', 'peeling', 'skill'] as const;
 
-const RESTART_MODE_TO_STAGE: Record<string, string | undefined> = {
+const RESTART_MODE_TO_STAGE: Record<string, ResettableStage | undefined> = {
   'from-pdf': 'pdf_conversion',
   'from-chunk': 'llm_chunking',
   'from-tree': 'tree_merging',
@@ -149,7 +149,7 @@ function setStatus(label: string, cls: string, dot = false): void {
 
 async function startPipeline(): Promise<void> {
   if (!selectedFile) {
-    alert('请先选择输入文件');
+    showToast('请先选择输入文件', 'warn');
     return;
   }
 
@@ -168,7 +168,7 @@ async function startPipeline(): Promise<void> {
       { kind: mode, file: selectedFile, name: selectedFile.name },
       {
         restart: restartMode === 'restart',
-        fromStage: RESTART_MODE_TO_STAGE[restartMode] as 'pdf_conversion' | 'llm_chunking' | 'tree_merging' | undefined,
+        fromStage: RESTART_MODE_TO_STAGE[restartMode],
       },
     );
     setStatus('完成', 'status-done');

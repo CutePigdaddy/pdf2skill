@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import JSZip from 'jszip';
 import { CheckpointManager } from '../src/storage/checkpoint';
 import { extractMineruZip } from '../src/mineru/zipExtract';
-import { writeText, readText } from '../src/storage/opfs';
+import { dirExists, ensureDir, writeText, readText } from '../src/storage/opfs';
 import { mockOpfsRoot } from './helpers/mockOpfs';
 
 describe('CheckpointManager', () => {
@@ -53,6 +53,18 @@ describe('CheckpointManager', () => {
     const ckpt = new CheckpointManager(dir);
     await ckpt.load();
     expect(ckpt.isStageCompleted('pdf_conversion')).toBe(false);
+  });
+});
+
+describe('dirExists', () => {
+  it('is true only for existing directories', async () => {
+    const root = mockOpfsRoot();
+    await ensureDir(root, 'a/b');
+    await writeText(root, 'f.txt', 'x');
+    expect(await dirExists(root, 'a')).toBe(true);
+    expect(await dirExists(root, 'a/b')).toBe(true);
+    expect(await dirExists(root, 'f.txt')).toBe(false);
+    expect(await dirExists(root, 'missing')).toBe(false);
   });
 });
 

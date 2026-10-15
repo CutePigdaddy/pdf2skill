@@ -5,8 +5,6 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>PDF2Skill</title>
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Ccircle cx='8' cy='8' r='6' fill='%232563eb'/%3E%3C/svg%3E">
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="/style.css">
 </head>
 <body>
@@ -469,7 +467,10 @@
       <button class="btn btn-primary btn-sm" id="btn-download-zip">⬇ 下载 zip</button>
       <button class="btn btn-danger btn-sm" id="btn-delete-job">🗑 删除任务</button>
     </div>
-    <button class="btn btn-ghost btn-sm" id="btn-refresh-outputs">↻ 刷新</button>
+    <div class="outputs-right">
+      <span class="storage-usage" id="storage-usage"></span>
+      <button class="btn btn-ghost btn-sm" id="btn-refresh-outputs">↻ 刷新</button>
+    </div>
   </div>
 
   <div class="card">

@@ -49,8 +49,8 @@
   --space-2xl: 48px;
   --space-3xl: 64px;
   /* type */
-  --font-body: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif;
-  --font-code: 'JetBrains Mono', ui-monospace, 'Cascadia Mono', Consolas, monospace;
+  --font-body: system-ui, -apple-system, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif;
+  --font-code: ui-monospace, 'Cascadia Mono', Consolas, 'Courier New', monospace;
   --shadow-sm: 0 1px 2px rgba(15, 23, 42, 0.04);
   --shadow-focus: 0 0 0 3px rgba(37, 99, 235, 0.15);
 }
@@ -810,6 +810,16 @@ input::placeholder { color: var(--muted-soft); }
   justify-content: space-between;
   margin-bottom: var(--space-lg);
 }
+.outputs-right {
+  display: flex;
+  align-items: center;
+  gap: var(--space-md);
+}
+.storage-usage {
+  font-size: 12.5px;
+  color: var(--muted-soft);
+  font-family: var(--font-code);
+}
 .outputs-empty {
   text-align: center;
   padding: var(--space-3xl) var(--space-xl);
@@ -947,6 +957,8 @@ input::placeholder { color: var(--muted-soft); }
   gap: 8px;
 }
 .saved-toast.show { opacity: 1; transform: translateY(0); }
+.saved-toast.toast-warn { background: #92400e; }
+.saved-toast.toast-error { background: #991b1b; }
 
 /* ── Reduced motion ────────────────────────────────────────────── */
 @media (prefers-reduced-motion: reduce) {

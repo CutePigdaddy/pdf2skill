@@ -7,7 +7,23 @@ let currentJobId = '';
 let blobUrl: string | null = null;
 
 function fmtBytes(n: number): string {
-  return (n / 1024).toFixed(1) + 'KB';
+  if (n < 1024) return n + 'B';
+  if (n < 1024 * 1024) return (n / 1024).toFixed(1) + 'KB';
+  if (n < 1024 * 1024 * 1024) return (n / 1024 / 1024).toFixed(1) + 'MB';
+  return (n / 1024 / 1024 / 1024).toFixed(1) + 'GB';
+}
+
+// ── Storage usage ─────────────────────────────────────────────────
+
+async function updateStorageUsage(): Promise<void> {
+  const el = document.getElementById('storage-usage');
+  if (!el) return;
+  try {
+    const est = await pdf2skill.storageEstimate();
+    el.textContent = est && est.quota > 0 ? `存储 ${fmtBytes(est.usage)} / ${fmtBytes(est.quota)}` : '';
+  } catch {
+    el.textContent = '';
+  }
 }
 
 // ── Job list ──────────────────────────────────────────────────────
@@ -121,7 +137,7 @@ async function previewFile(path: string): Promise<void> {
 
 async function downloadZip(): Promise<void> {
   if (!currentJobId) {
-    alert('请先选择任务');
+    showToast('请先选择任务', 'warn');
     return;
   }
   try {
@@ -134,13 +150,13 @@ async function downloadZip(): Promise<void> {
     showToast('zip 已生成，正在下载');
   } catch (e) {
     const info = errInfoOf(e);
-    alert('下载失败: ' + info.message + (info.advice ? '\n' + info.advice : ''));
+    showToast('下载失败: ' + info.message + (info.advice ? ' — ' + info.advice : ''), 'error');
   }
 }
 
 async function deleteJob(): Promise<void> {
   if (!currentJobId) {
-    alert('请先选择任务');
+    showToast('请先选择任务', 'warn');
     return;
   }
   if (!confirm(`确定删除任务 '${currentJobId}'？其全部输出与 checkpoint 将从浏览器存储中移除。`)) return;
@@ -150,10 +166,11 @@ async function deleteJob(): Promise<void> {
     showToast('任务已删除');
     await refreshJobList();
     await loadTree();
+    await updateStorageUsage();
     $('file-viewer').style.display = 'none';
   } catch (e) {
     const info = errInfoOf(e);
-    alert('删除失败: ' + info.message);
+    showToast('删除失败: ' + info.message, 'error');
   }
 }
 
@@ -165,12 +182,7 @@ export function setupOutputsTab(sdkInstance: Pdf2Skill): void {
     currentJobId = (e.target as HTMLSelectElement).value;
     void loadTree();
   });
-  $('btn-refresh-outputs').addEventListener('click', () => {
-    void (async () => {
-      await refreshJobList();
-      await loadTree();
-    })();
-  });
+  $('btn-refresh-outputs').addEventListener('click', () => void refreshOutputs());
   $('btn-download-zip').addEventListener('click', () => void downloadZip());
   $('btn-delete-job').addEventListener('click', () => void deleteJob());
 }
@@ -178,4 +190,5 @@ export function setupOutputsTab(sdkInstance: Pdf2Skill): void {
 export async function refreshOutputs(): Promise<void> {
   await refreshJobList();
   await loadTree();
+  await updateStorageUsage();
 }

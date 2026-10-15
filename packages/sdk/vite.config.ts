@@ -16,7 +16,7 @@ export default defineConfig({
       fileName: (format) => (format === 'es' ? 'pdf2skill.js' : 'pdf2skill.cjs'),
     },
     rollupOptions: {
-      external: ['jszip', 'pdf-lib', 'pdfjs-dist'],
+      external: ['jszip', 'pdf-lib'],
     },
   },
   test: {

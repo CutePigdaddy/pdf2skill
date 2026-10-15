@@ -5,7 +5,7 @@ import type { LlmTransport } from './llmTransport';
 import { ChunkNode } from './treeMerger';
 import { charCount, codePoints } from './levenshtein';
 import { CheckpointManager } from '../storage/checkpoint';
-import { ensureDir, fileExists, getDir, writeText, writeBytes } from '../storage/opfs';
+import { dirExists, ensureDir, getDir, writeText, writeBytes } from '../storage/opfs';
 
 export interface SkillEngineOptions {
   /** Job root directory (parent of the skill output dir; images live at `<jobRoot>/images`). */
@@ -119,7 +119,7 @@ export class SkillEngine {
 
     // 0. Copy images directory (idempotent)
     const sourceImgDir = this.opts.jobRoot ? await getDir(this.opts.jobRoot, 'images') : null;
-    if (sourceImgDir && !(await fileExists(refDir, 'images'))) {
+    if (sourceImgDir && !(await dirExists(refDir, 'images'))) {
       const targetImgDir = await ensureDir(refDir, 'images');
       await copyTree(sourceImgDir, targetImgDir);
       this.log('Copied images into references/images');
@@ -267,7 +267,7 @@ function formatTemplate(tpl: string, vars: Record<string, string>): string {
 
 /** Recursive directory copy (Python shutil.copytree equivalent). */
 async function copyTree(src: FileSystemDirectoryHandle, dst: FileSystemDirectoryHandle): Promise<void> {
-  for await (const [name, handle] of src as unknown as AsyncIterable<[string, FileSystemHandle]>) {
+  for await (const [name, handle] of src) {
     if (handle.kind === 'file') {
       const file = await (handle as FileSystemFileHandle).getFile();
       await writeBytes(dst, name, new Uint8Array(await file.arrayBuffer()));

@@ -51,6 +51,10 @@ export async function fileExists(dir: FileSystemDirectoryHandle, name: string): 
   }
 }
 
+export async function dirExists(dir: FileSystemDirectoryHandle, path: string): Promise<boolean> {
+  return (await getDir(dir, path)) !== null;
+}
+
 export async function writeBytes(
   dir: FileSystemDirectoryHandle,
   name: string,
@@ -58,7 +62,7 @@ export async function writeBytes(
 ): Promise<void> {
   const handle = await dir.getFileHandle(name, { create: true });
   const writable = await handle.createWritable();
-  await writable.write(data as never);
+  await writable.write(data as FileSystemWriteChunkType);
   await writable.close();
 }
 
@@ -130,9 +134,7 @@ export interface DirEntry {
 
 export async function listDir(dir: FileSystemDirectoryHandle): Promise<DirEntry[]> {
   const entries: DirEntry[] = [];
-  for await (const [name, handle] of (dir as unknown as AsyncIterable<
-    [string, FileSystemHandle]
-  >)) {
+  for await (const [name, handle] of dir) {
     entries.push({ name, kind: handle.kind === 'file' ? 'file' : 'directory' });
   }
   entries.sort((a, b) => a.name.localeCompare(b.name));
@@ -153,9 +155,7 @@ export async function copyDirFiles(
   dstDir: FileSystemDirectoryHandle,
 ): Promise<number> {
   let count = 0;
-  for await (const [name, handle] of (srcDir as unknown as AsyncIterable<
-    [string, FileSystemHandle]
-  >)) {
+  for await (const [name, handle] of srcDir) {
     if (handle.kind !== 'file') continue;
     const src = await (handle as FileSystemFileHandle).getFile();
     await writeBytes(dstDir, name, new Uint8Array(await src.arrayBuffer()));

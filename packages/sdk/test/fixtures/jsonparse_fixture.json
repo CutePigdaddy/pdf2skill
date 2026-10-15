@@ -1,0 +1,162 @@
+{
+  "cases": [
+    {
+      "input": "{\"a\": 1, \"b\": \"two\"}",
+      "name": "plain_json",
+      "ok": true,
+      "value": {
+        "a": 1,
+        "b": "two"
+      }
+    },
+    {
+      "input": "```json\n{\"subsections\": [], \"suggested_title\": \"Sub\"}\n```",
+      "name": "markdown_fence",
+      "ok": true,
+      "value": {
+        "subsections": [],
+        "suggested_title": "Sub"
+      }
+    },
+    {
+      "input": "Here is the result: {\"x\": \"y\"} hope it helps",
+      "name": "surrounding_prose",
+      "ok": true,
+      "value": {
+        "x": "y"
+      }
+    },
+    {
+      "input": "<think>\nstep 1\nstep 2\n</think>\n{\"answer\": 42}",
+      "name": "think_multiline",
+      "ok": true,
+      "value": {
+        "answer": 42
+      }
+    },
+    {
+      "input": "<think>a</think>prefix<think>b</think>{'k': 'v', 'n': None, 'flag': True}",
+      "name": "think_multiple_and_python_literals",
+      "ok": true,
+      "value": {
+        "flag": true,
+        "k": "v",
+        "n": null
+      }
+    },
+    {
+      "input": "{'title': 'It\\'s a \\\"test\\\"', 'n': None}",
+      "name": "python_escapes",
+      "ok": true,
+      "value": {
+        "n": null,
+        "title": "It's a \"test\""
+      }
+    },
+    {
+      "input": "{\"deep\": {\"nested\": {\"a\": [1, 2, {\"b\": 3}]}}}",
+      "name": "nested",
+      "ok": true,
+      "value": {
+        "deep": {
+          "nested": {
+            "a": [
+              1,
+              2,
+              {
+                "b": 3
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "input": "  \n\t {\"spaced\": 1} \n ",
+      "name": "whitespace_padded",
+      "ok": true,
+      "value": {
+        "spaced": 1
+      }
+    },
+    {
+      "input": "{\"a\": 1, \"b\": 2,}",
+      "name": "trailing_comma_dict",
+      "ok": true,
+      "value": {
+        "a": 1,
+        "b": 2
+      }
+    },
+    {
+      "input": "{'a': [1, 2, ], 'b': {'c': 3, }, }",
+      "name": "trailing_comma_nested",
+      "ok": true,
+      "value": {
+        "a": [
+          1,
+          2
+        ],
+        "b": {
+          "c": 3
+        }
+      }
+    },
+    {
+      "input": "{'msg': 'line1\\nline2'}",
+      "name": "escaped_newline_in_string",
+      "ok": true,
+      "value": {
+        "msg": "line1\nline2"
+      }
+    },
+    {
+      "input": "<think>unclosed {\"a\": 1}",
+      "name": "unclosed_think_tag",
+      "ok": true,
+      "value": {
+        "a": 1
+      }
+    },
+    {
+      "input": "[{\"a\": 1}]",
+      "name": "top_level_array",
+      "ok": true,
+      "value": [
+        {
+          "a": 1
+        }
+      ]
+    },
+    {
+      "error_type": "LLMParsingError",
+      "input": "text {\"a\": 1} more {\"b\": 2} tail",
+      "name": "two_objects_with_prose_between",
+      "ok": false
+    },
+    {
+      "error_type": "LLMParsingError",
+      "input": "{\"a\": 1",
+      "name": "unclosed_object",
+      "ok": false
+    }
+  ],
+  "generator": "packages/sdk/test/fixtures/gen_jsonparse_fixture.py",
+  "lenient_cases": [
+    {
+      "input": "Here is the result: {\"x\": {\"y\": [true, false, null]}} — done.",
+      "name": "json_keywords_in_prose",
+      "python_error_type": "LLMParsingError",
+      "ts_value": {
+        "x": {
+          "y": [
+            true,
+            false,
+            null
+          ]
+        }
+      }
+    }
+  ],
+  "reference": "utils/llm_client.py::LLMClient.parse_json_response"
+}

@@ -3,10 +3,15 @@ import type { ProviderConfig } from '@pdf2skill/sdk';
 import { fetchModels, getKeys, getProviders, setKey, syncProviders } from '../api/backend';
 import { $, checked, escapeHtml, errInfoOf, setChecked, setVal, showToast, val } from '../ui/dom';
 
-const STAGES = [
-  { selId: 'chunk-provider', stageKey: 'chunking', routerKey: 'chunking' as const, displayId: 'chunk-model-display' },
-  { selId: 'peel-provider', stageKey: 'peeling', routerKey: 'peeling' as const, displayId: 'peel-model-display' },
-  { selId: 'skill-provider', stageKey: 'skill_engine', routerKey: 'skillEngine' as const, displayId: 'skill-model-display' },
+const STAGES: {
+  selId: string;
+  stageKey: 'chunking' | 'peeling' | 'skill_engine';
+  routerKey: 'chunking' | 'peeling' | 'skillEngine';
+  displayId: string;
+}[] = [
+  { selId: 'chunk-provider', stageKey: 'chunking', routerKey: 'chunking', displayId: 'chunk-model-display' },
+  { selId: 'peel-provider', stageKey: 'peeling', routerKey: 'peeling', displayId: 'peel-model-display' },
+  { selId: 'skill-provider', stageKey: 'skill_engine', routerKey: 'skillEngine', displayId: 'skill-model-display' },
 ];
 const MODEL_KEYS = ['chunking_model', 'peeling_model', 'skill_engine_model'] as const;
 
@@ -94,17 +99,14 @@ function renderDatalists(providerName: string, models: string[]): void {
   }
 }
 
-function providerModel(providerName: string, stageKey: string): string {
+function providerModel(providerName: string, stageKey: 'chunking' | 'peeling' | 'skill_engine'): string {
   if (!providerName) return '';
   const rowInput = document.querySelector<HTMLInputElement>(
     `.provider-row[data-provider="${providerName}"] input[data-field="${stageKey}_model"]`,
   );
   if (rowInput && rowInput.value.trim() !== '') return rowInput.value.trim();
-  return (
-    (sdk().getConfig().providers[providerName] as unknown as Record<string, string> | undefined)?.[
-      stageKey + '_model'
-    ] || ''
-  );
+  const key = `${stageKey}_model` as const;
+  return sdk().getConfig().providers[providerName]?.[key] || '';
 }
 
 function updateStageDisplay(
@@ -186,27 +188,28 @@ async function saveNewProvider(): Promise<void> {
   const envVar = val('new-provider-env').trim();
   const base = val('new-provider-base-url').trim();
 
-  if (!/^[a-z0-9][a-z0-9_-]*$/.test(name)) {
-    return showFormError('名称不合法：只能包含小写字母、数字、下划线和连字符，且以字母或数字开头');
-  }
   if (name in sdk().getConfig().providers) {
     return showFormError(`Provider '${name}' 已存在，可直接在下方编辑`);
   }
-  if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(envVar)) {
-    return showFormError('API Key 环境变量名不合法：只能包含字母、数字、下划线，且以字母或下划线开头');
-  }
-  if (!base.startsWith('http://') && !base.startsWith('https://')) {
-    return showFormError('base_url 必须以 http:// 或 https:// 开头');
-  }
-
-  const cfg = sdk().getConfig();
-  cfg.providers[name] = {
+  const candidate: ProviderConfig = {
     base_url: base,
     api_key_env: envVar,
     chunking_model: val('new-provider-chunking').trim(),
     peeling_model: val('new-provider-peeling').trim(),
     skill_engine_model: val('new-provider-skill').trim(),
   };
+  // Validate the single candidate with the same rules the backend applies.
+  const issues = validateConfig({
+    ...sdk().getConfig(),
+    providers: { [name]: candidate },
+    routers: { chunking: '', peeling: '', skillEngine: '' },
+  });
+  if (issues.length > 0) {
+    return showFormError(`${issues[0].message} — ${issues[0].advice}`);
+  }
+
+  const cfg = sdk().getConfig();
+  cfg.providers[name] = candidate;
   sdk().configure({ providers: cfg.providers });
   hideAddProviderForm();
   await loadConfigUI();
@@ -348,7 +351,7 @@ async function applySetKey(envVar: string, input: HTMLInputElement): Promise<voi
   }
 }
 
-function gatherProvidersFromUI(): Record<string, ProviderConfig> {
+function gatherProvidersFromUI(): Record<string, Record<string, string>> {
   const providers: Record<string, Record<string, string>> = {};
   document.querySelectorAll<HTMLElement>('.provider-row').forEach((row) => {
     const name = row.dataset.provider!;
@@ -357,47 +360,32 @@ function gatherProvidersFromUI(): Record<string, ProviderConfig> {
       providers[name][inp.dataset.field!] = inp.value.trim();
     });
   });
-  return providers as unknown as Record<string, ProviderConfig>;
+  return providers;
+}
+
+/** Scraped UI fields / server payloads are all-strings; lift to a typed config. */
+function toProviderConfig(fields: Record<string, string>): ProviderConfig {
+  const cfg: ProviderConfig = {
+    base_url: fields.base_url || '',
+    api_key_env: fields.api_key_env || '',
+  };
+  for (const k of ['chunking_model', 'peeling_model', 'skill_engine_model'] as const) {
+    const v = fields[k];
+    if (v) cfg[k] = v;
+  }
+  return cfg;
+}
+
+function toProviderConfigMap(all: Record<string, Record<string, string>>): Record<string, ProviderConfig> {
+  const out: Record<string, ProviderConfig> = {};
+  for (const [name, fields] of Object.entries(all)) out[name] = toProviderConfig(fields);
+  return out;
 }
 
 export async function saveConfigUI(): Promise<boolean> {
   hideSaveError();
 
   const providers = gatherProvidersFromUI();
-
-  // Client-side validation (same rules as the backend)
-  for (const [name, cfg] of Object.entries(providers)) {
-    if (!/^[a-z0-9][a-z0-9_-]*$/.test(name)) {
-      showSaveError({
-        errInfo: {
-          code: 'INVALID_PROVIDER_NAME',
-          message: `Provider 名称 '${name}' 不合法`,
-          advice: '名称只能包含小写字母、数字、下划线和连字符，且以字母或数字开头',
-        },
-      });
-      return false;
-    }
-    if (!(cfg.base_url || '').startsWith('http://') && !(cfg.base_url || '').startsWith('https://')) {
-      showSaveError({
-        errInfo: {
-          code: 'INVALID_BASE_URL',
-          message: `Provider '${name}' 的 base_url 必须以 http:// 或 https:// 开头`,
-          advice: '示例: https://api.example.com/v1',
-        },
-      });
-      return false;
-    }
-    if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(cfg.api_key_env || '')) {
-      showSaveError({
-        errInfo: {
-          code: 'INVALID_ENV_VAR',
-          message: `Provider '${name}' 的 API Key 环境变量名不合法`,
-          advice: '只能包含字母、数字、下划线，且以字母或下划线开头',
-        },
-      });
-      return false;
-    }
-  }
 
   const routers = {
     chunking: (document.getElementById('chunk-provider') as HTMLSelectElement).value,
@@ -433,7 +421,7 @@ export async function saveConfigUI(): Promise<boolean> {
   };
 
   const cfg = sdk().getConfig();
-  cfg.providers = providers;
+  cfg.providers = toProviderConfigMap(providers);
   cfg.routers = routers;
   Object.assign(cfg.pdf, pdf);
   Object.assign(cfg.mineru, mineru);
@@ -466,7 +454,7 @@ async function importFromServer(): Promise<void> {
       skillEngine: data.routers?.skill_engine_provider || data.routers?.skillEngine || '',
     };
     sdk().configure({
-      providers: data.providers as unknown as Record<string, ProviderConfig>,
+      providers: toProviderConfigMap(data.providers),
       routers,
     });
     await loadConfigUI();
@@ -485,7 +473,7 @@ async function syncToServer(): Promise<void> {
     skillEngine: (document.getElementById('skill-provider') as HTMLSelectElement).value,
   };
   try {
-    await syncProviders(providers as unknown as Record<string, Record<string, string>>, routers);
+    await syncProviders(providers, routers);
     showToast('已同步到服务端 settings.yaml');
   } catch (e) {
     showSaveError(e);

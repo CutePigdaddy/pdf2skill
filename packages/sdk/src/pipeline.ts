@@ -1,4 +1,4 @@
-import type { Pdf2SkillConfig, StageName } from './types';
+import type { Pdf2SkillConfig, ResettableStage } from './types';
 import type { Emitter } from './events';
 import { Pdf2SkillError } from './errors';
 import type { LlmTransport } from './stages/llmTransport';
@@ -23,7 +23,7 @@ export interface RunPipelineOptions {
   jobRoot: FileSystemDirectoryHandle;
   config: Pdf2SkillConfig;
   input: PipelineInput;
-  fromStage?: StageName;
+  fromStage?: ResettableStage;
   restart?: boolean;
   signal?: AbortSignal;
   /** LLM factory (defaults to real clients through the proxy backend). */

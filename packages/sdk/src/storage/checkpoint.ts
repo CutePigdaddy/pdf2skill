@@ -1,3 +1,4 @@
+import type { ResettableStage } from '../types';
 import { fileExists, readText, writeTextAtomic } from './opfs';
 
 export const CHECKPOINT_VERSION = 1;
@@ -13,7 +14,7 @@ export interface CheckpointState {
  * ``.checkpoint.json`` inside the job's OPFS directory, same JSON shape.
  */
 export class CheckpointManager {
-  static readonly STAGE_ORDER = ['pdf_conversion', 'llm_chunking', 'tree_merging'];
+  static readonly STAGE_ORDER = ['pdf_conversion', 'llm_chunking', 'tree_merging'] as const;
 
   readonly dir: FileSystemDirectoryHandle;
   readonly fileName = '.checkpoint.json';
@@ -71,7 +72,7 @@ export class CheckpointManager {
   }
 
   /** Remove stageName and all later stages (re-run from a specific stage). */
-  async resetFromStage(stageName: string): Promise<void> {
+  async resetFromStage(stageName: ResettableStage): Promise<void> {
     if (!CheckpointManager.STAGE_ORDER.includes(stageName)) {
       throw new Error(
         `Unknown stage: ${stageName}. Valid: ${CheckpointManager.STAGE_ORDER.join(', ')}`,

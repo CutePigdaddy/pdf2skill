@@ -7,12 +7,17 @@ export function escapeHtml(s: unknown): string {
     .replace(/'/g, '&#39;');
 }
 
-export function showToast(msg: string): void {
+export type ToastKind = 'success' | 'warn' | 'error';
+
+const TOAST_SYMBOLS: Record<ToastKind, string> = { success: '✓', warn: '⚠', error: '✕' };
+
+export function showToast(msg: string, kind: ToastKind = 'success'): void {
   const t = document.getElementById('toast');
   if (!t) return;
-  t.textContent = '✓ ' + msg;
-  t.classList.add('show');
-  setTimeout(() => t.classList.remove('show'), 2000);
+  t.textContent = `${TOAST_SYMBOLS[kind]} ${msg}`;
+  t.classList.remove('toast-success', 'toast-warn', 'toast-error');
+  t.classList.add('toast-' + kind, 'show');
+  setTimeout(() => t.classList.remove('show'), kind === 'success' ? 2000 : 3200);
 }
 
 export interface ErrorInfo {

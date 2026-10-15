@@ -85,6 +85,15 @@ export function repairPythonLiteral(text: string): string {
       i = j;
       continue;
     }
+    if (ch === ',') {
+      // Python dict/list literals allow trailing commas; JSON does not.
+      let j = i + 1;
+      while (j < n && /\s/.test(text[j])) j++;
+      if (text[j] === '}' || text[j] === ']') {
+        i++;
+        continue;
+      }
+    }
     out += ch;
     i++;
   }

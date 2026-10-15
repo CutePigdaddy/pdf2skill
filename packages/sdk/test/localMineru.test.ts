@@ -6,11 +6,11 @@ import { Pdf2SkillError } from '../src/errors';
 import { fileExists, getDir } from '../src/storage/opfs';
 import { mockOpfsRoot } from './helpers/mockOpfs';
 
-async function buildZip(): Promise<Uint8Array> {
+async function buildZip(): Promise<Uint8Array<ArrayBuffer>> {
   const zip = new JSZip();
   zip.file('book/auto/book.md', '# Title\n\nHello');
   zip.file('book/auto/images/fig1.png', new Uint8Array([1, 2, 3]));
-  return zip.generateAsync({ type: 'uint8array' });
+  return new Uint8Array(await zip.generateAsync({ type: 'arraybuffer' }));
 }
 
 function clientWithFetch(fetchImpl: typeof fetch): LocalMinerUClient {

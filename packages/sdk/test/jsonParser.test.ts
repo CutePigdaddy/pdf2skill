@@ -36,6 +36,14 @@ describe('parseJsonResponse', () => {
     });
   });
 
+  it('strips trailing commas like Python literal_eval does', () => {
+    expect(parseJsonResponse('{"a": 1, "b": 2,}')).toEqual({ a: 1, b: 2 });
+    expect(parseJsonResponse("{'a': [1, 2, ], 'b': {'c': 3, }, }")).toEqual({
+      a: [1, 2],
+      b: { c: 3 },
+    });
+  });
+
   it('does not convert True inside string contents', () => {
     expect(parseJsonResponse("{'note': 'True story', 'flag': True}")).toEqual({
       note: 'True story',

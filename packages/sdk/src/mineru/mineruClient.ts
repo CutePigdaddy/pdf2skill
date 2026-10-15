@@ -267,6 +267,11 @@ export class RemoteMinerUClient {
   ): Promise<string> {
     const pageLimit = this.config.pdf.page_limit;
     const parts = await splitPdfIfNeeded(pdfBytes, filename, pageLimit);
+    if (parts.length > 1) {
+      // Python: _split_pdf_if_needed writes parts to output_dir/splits/ (only when over the limit).
+      const splitsDir = await ensureDir(jobRoot, 'splits');
+      for (const part of parts) await writeBytes(splitsDir, part.name, part.bytes);
+    }
     const mdContents: string[] = [];
     for (let i = 0; i < parts.length; i++) {
       const part = parts[i];

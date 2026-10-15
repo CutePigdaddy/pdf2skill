@@ -44,6 +44,17 @@ async function updateHealth(): Promise<void> {
   text.textContent = ok ? '代理后端已连接' : '代理后端未连接（LLM/MinerU 不可用）';
 }
 
+// ── Persistent storage ────────────────────────────────────────────
+
+async function requestPersistentStorage(): Promise<void> {
+  try {
+    const granted = await navigator.storage?.persist?.();
+    console.log('[pdf2skill] persistent storage:', granted ?? 'unavailable');
+  } catch {
+    // Best-effort — OPFS works without the grant, data may be evicted under pressure.
+  }
+}
+
 // ── Init ──────────────────────────────────────────────────────────
 
 async function init(): Promise<void> {
@@ -52,8 +63,11 @@ async function init(): Promise<void> {
   setupRunTab(pdf2skill);
   setupOutputsTab(pdf2skill);
 
+  void requestPersistentStorage();
+
   await updateHealth();
-  setInterval(() => void updateHealth(), 30_000);
+  const healthTimer = setInterval(() => void updateHealth(), 30_000);
+  window.addEventListener('pagehide', () => clearInterval(healthTimer));
 
   try {
     await loadConfigUI();
