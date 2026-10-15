@@ -28,9 +28,9 @@ llm:
       peeling_model: MiniMax-M2.5
       skill_engine_model: MiniMax-M2.5
   routers:
-    chunking_provider: siliconflow
-    peeling_provider: siliconflow
-    skill_engine_provider: siliconflow
+    chunking_provider: nova
+    peeling_provider: nova
+    skill_engine_provider: nova
 mineru:
   api_mode: remote
   language: ch
@@ -57,4 +57,4 @@ pdf:
   chunk_merge_threshold: 5000
   chunk_min_threshold: 1000
   page_limit: 200
-  request_interval: 1
+  request_interval: 0.3

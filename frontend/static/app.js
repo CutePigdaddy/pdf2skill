@@ -444,6 +444,7 @@ async function loadInputs() {
       const stem = opt.replace(/\.[^.]+$/, '');
       document.getElementById('output-dir').value = 'outputs/' + stem;
     }
+    loadCheckpoint();
   };
 }
 
@@ -523,46 +524,38 @@ async function deleteInput() {
 }
 
 // ── Pipeline ─────────────────────────────────────────────────────
-const STAGE_PATTERNS = [
-  { id: 'step-1', conn: 'conn-1', patterns: [/chunk/i, /pdf.*conver/i, /mining/i, /mineru/i] },
-  { id: 'step-2', conn: 'conn-2', patterns: [/peel/i, /tree.*merge/i, /merg/i] },
-  { id: 'step-3', conn: null, patterns: [/skill/i, /generat/i] },
-];
+// 4-stage flow served by backend /api/status -> stages array.
+const STAGE_KEYS = ['mineru', 'chunking', 'peeling', 'skill'];
 
-function updatePipelineProgress(logText) {
+function renderStages(stages) {
+  if (!stages || !stages.length) return;
   const progressEl = document.getElementById('pipeline-progress');
-  if (!logText || !logText.trim()) return;
-
   progressEl.classList.add('visible');
 
-  let currentStage = 0;
-  const lines = logText.split('\n').filter(l => l.trim());
+  const statusOf = {};
+  const detailOf = {};
+  stages.forEach(s => {
+    statusOf[s.key] = s.status || 'pending';
+    detailOf[s.key] = s.detail || '';
+  });
 
-  for (let i = 0; i < STAGE_PATTERNS.length; i++) {
-    const stage = STAGE_PATTERNS[i];
-    const hasMatch = lines.some(line => stage.patterns.some(p => p.test(line)));
-    if (hasMatch) currentStage = i;
-  }
+  for (let i = 0; i < STAGE_KEYS.length; i++) {
+    const key = STAGE_KEYS[i];
+    const stepEl = document.getElementById('step-' + key);
+    const status = statusOf[key] || 'pending';
+    stepEl.classList.remove('pending', 'active', 'done', 'failed');
+    stepEl.classList.add(status);
+    const detailEl = document.getElementById('step-' + key + '-detail');
+    if (detailEl) detailEl.textContent = detailOf[key] || '';
 
-  const isDone = lines.some(l => /pipeline.*complete|done|完成/i.test(l));
-  const isFailed = lines.some(l => /error|failed|失败/i.test(l) && !/mineru_progress/i.test(l));
-
-  for (let i = 0; i < STAGE_PATTERNS.length; i++) {
-    const stepEl = document.getElementById(STAGE_PATTERNS[i].id);
-    const connEl = STAGE_PATTERNS[i].conn ? document.getElementById(STAGE_PATTERNS[i].conn) : null;
-
-    stepEl.classList.remove('active', 'done', 'failed');
-
-    if (isDone) {
-      stepEl.classList.add('done');
-      if (connEl) connEl.classList.add('done');
-    } else if (isFailed && i === currentStage) {
-      stepEl.classList.add('failed');
-    } else if (i < currentStage) {
-      stepEl.classList.add('done');
-      if (connEl) connEl.classList.add('done');
-    } else if (i === currentStage) {
-      stepEl.classList.add('active');
+    // connector (conn-{i+1}) is "done" when both adjacent stages are done
+    const connEl = document.getElementById('conn-' + (i + 1));
+    if (connEl) {
+      const prev = STAGE_KEYS[i];
+      const next = STAGE_KEYS[i + 1];
+      const prevOk = prev && (statusOf[prev] === 'done' || statusOf[prev] === 'failed');
+      const nextOk = next && (statusOf[next] === 'done' || statusOf[next] === 'failed');
+      connEl.classList.toggle('done', !!(prevOk && nextOk));
     }
   }
 }
@@ -570,18 +563,60 @@ function updatePipelineProgress(logText) {
 function resetPipelineProgress() {
   const progressEl = document.getElementById('pipeline-progress');
   progressEl.classList.remove('visible');
-  STAGE_PATTERNS.forEach(s => {
-    const stepEl = document.getElementById(s.id);
+  STAGE_KEYS.forEach((key, i) => {
+    const stepEl = document.getElementById('step-' + key);
     stepEl.classList.remove('active', 'done', 'failed');
-    const connEl = s.conn ? document.getElementById(s.conn) : null;
+    stepEl.classList.add('pending');
+    const detailEl = document.getElementById('step-' + key + '-detail');
+    if (detailEl) detailEl.textContent = '';
+    const connEl = document.getElementById('conn-' + (i + 1));
     if (connEl) connEl.classList.remove('done');
   });
+}
+
+// Restart-mode select value -> from_stage (empty for continue/restart)
+const RESTART_MODE_TO_STAGE = {
+  'from-pdf': 'pdf_conversion',
+  'from-chunk': 'llm_chunking',
+  'from-tree': 'tree_merging',
+};
+// stage key -> short English label for the checkpoint badge display
+// (consistent with the 4-stage progress dots: MinerU/Chunking/Peeling)
+const CKPT_STAGE_LABELS = {
+  pdf_conversion: 'MinerU',
+  llm_chunking: 'Chunking',
+  tree_merging: 'Peeling',
+};
+
+async function loadCheckpoint() {
+  const dirEl = document.getElementById('output-dir');
+  const statusEl = document.getElementById('checkpoint-status');
+  if (!dirEl || !statusEl) return;
+  const outputDir = dirEl.value.trim();
+  if (!outputDir) {
+    statusEl.innerHTML = '<span class="ckpt-empty">— 无历史记录 —</span>';
+    return;
+  }
+  try {
+    const data = await api('/api/checkpoint?output_dir=' + encodeURIComponent(outputDir));
+    if (!data.exists || !data.completed_stages?.length) {
+      statusEl.innerHTML = '<span class="ckpt-empty">— 无历史记录 —</span>';
+      return;
+    }
+    const badges = data.completed_stages
+      .map(s => `<span class="ckpt-badge ckpt-done">✓ ${escapeHtml(CKPT_STAGE_LABELS[s] || s)}</span>`)
+      .join('');
+    statusEl.innerHTML = badges;
+  } catch (e) {
+    statusEl.innerHTML = '<span class="ckpt-empty">— 历史记录读取失败 —</span>';
+  }
 }
 
 async function startPipeline() {
   const inputFile = document.getElementById('input-file').value;
   if (!inputFile) { alert('请选择输入文件'); return; }
 
+  const restartMode = document.getElementById('restart-mode').value;
   const body = {
     input_file: inputFile,
     mode: document.getElementById('input-mode').value,
@@ -593,6 +628,8 @@ async function startPipeline() {
     peel_model: providerModel(document.getElementById('peel-provider').value, 'peeling'),
     skill_model: providerModel(document.getElementById('skill-provider').value, 'skill_engine'),
     request_interval: document.getElementById('request-interval').value,
+    restart: restartMode === 'restart',
+    from_stage: RESTART_MODE_TO_STAGE[restartMode] || '',
   };
 
   try {
@@ -602,7 +639,6 @@ async function startPipeline() {
     document.getElementById('btn-stop').style.display = 'inline-flex';
     document.getElementById('run-status').innerHTML = '<span class="status status-running"><span class="status-dot"></span>运行中</span>';
     document.getElementById('log-box').textContent = '';
-    document.getElementById('mineru-progress').classList.remove('active');
     document.getElementById('mineru-error').classList.remove('active');
     resetPipelineProgress();
     pollLog();
@@ -636,15 +672,9 @@ async function pollLog() {
     logBox.textContent = logText || '(无日志)';
     logBox.scrollTop = logBox.scrollHeight;
 
-    updatePipelineProgress(logText);
-
-    if (data.mineru_progress) {
-      updateMinerUProgress(data.mineru_progress);
-    } else if (data.status === 'running') {
-      const muMode = (configData?.settings?.mineru?.api_mode || 'local').toLowerCase();
-      if (muMode === 'remote') {
-        updateMinerUProgress({ phase: 'pending', pct: 0, extracted: 0, total: 0 });
-      }
+    // Structured 4-stage progress comes from the backend (data.stages)
+    if (data.stages) {
+      renderStages(data.stages);
     }
     if (data.mineru_error) {
       showMinerUError(data.mineru_error);
@@ -669,24 +699,13 @@ function finishJob(status, mineruError) {
     showMinerUError(mineruError);
   }
 
+  // Stage dots already reflect the terminal state via the last renderStages()
+  // call (backend converges status to done/failed/stopped before returning).
+
   const cls = status === 'done' ? 'status-done' : status === 'failed' ? 'status-failed' : 'status-running';
   const label = status === 'done' ? '完成' : status === 'failed' ? '失败' : status;
   const dot = status === 'done' ? '' : status === 'failed' ? '' : '<span class="status-dot"></span>';
   document.getElementById('run-status').innerHTML = `<span class="status ${cls}">${dot}${label}</span>`;
-
-  if (status === 'done') {
-    STAGE_PATTERNS.forEach(s => {
-      document.getElementById(s.id).classList.remove('active', 'failed');
-      document.getElementById(s.id).classList.add('done');
-      if (s.conn) document.getElementById(s.conn).classList.add('done');
-    });
-  } else if (status === 'failed') {
-    const activeStep = document.querySelector('.pipeline-step.active');
-    if (activeStep) {
-      activeStep.classList.remove('active');
-      activeStep.classList.add('failed');
-    }
-  }
 }
 
 // ── Outputs ──────────────────────────────────────────────────────
@@ -776,51 +795,6 @@ function setMinerUMode(mode) {
   document.getElementById('mineru-remote').classList.toggle('active', mode === 'remote');
 }
 
-const PHASE_LABELS = {
-  uploading: '上传中',
-  queued: '排队中',
-  parsing: '解析中',
-  converting: '格式转换中',
-  running: '解析中',
-  pending: '排队中',
-  done: '完成',
-  failed: '失败',
-};
-
-function updateMinerUProgress(prog) {
-  const card = document.getElementById('mineru-progress');
-  const fill = document.getElementById('mineru-progress-fill');
-  const label = document.getElementById('mineru-progress-label');
-  const pages = document.getElementById('mineru-progress-pages');
-  const pctEl = document.getElementById('mineru-progress-pct');
-
-  card.classList.add('active');
-
-  const phase = prog.phase || 'unknown';
-  const phaseLabel = PHASE_LABELS[phase] || phase;
-  label.textContent = `MinerU ${phaseLabel}`;
-
-  const pct = prog.pct || 0;
-  const total = prog.total || 0;
-  const extracted = prog.extracted || 0;
-
-  if (total > 0) {
-    fill.classList.remove('indeterminate');
-    fill.style.width = pct + '%';
-    pages.textContent = `${extracted} / ${total} 页`;
-    pctEl.textContent = pct + '%';
-  } else {
-    fill.classList.add('indeterminate');
-    fill.style.width = '30%';
-    pages.textContent = phaseLabel;
-    pctEl.textContent = '';
-  }
-
-  if (phase !== 'failed') {
-    document.getElementById('mineru-error').classList.remove('active');
-  }
-}
-
 function showMinerUError(err) {
   const card = document.getElementById('mineru-error');
   const codeEl = document.getElementById('mineru-error-code');
@@ -834,6 +808,8 @@ function showMinerUError(err) {
 // ── Init ─────────────────────────────────────────────────────────
 async function init() {
   setupUploadZone();
+  const outputDirEl = document.getElementById('output-dir');
+  if (outputDirEl) outputDirEl.addEventListener('change', loadCheckpoint);
   try {
     await loadConfig();
   } catch (e) {
@@ -846,6 +822,7 @@ async function init() {
     const sel = document.getElementById('input-file');
     sel.innerHTML = '<option value="">— 加载失败，请刷新重试 —</option>';
   }
+  loadCheckpoint();
 }
 
 init();

@@ -47,13 +47,13 @@
       <div class="step-title">项目介绍</div>
       <div class="step-text">将 PDF 教材/文档自动转化为<strong>结构化知识索引</strong>与<strong>可复用的技能库</strong>（SKILL.md + 分块引用文件）。四阶段流水线：</div>
       <div class="step-flow">
-        <span class="flow-item">① MinerU 解析 PDF → Markdown</span>
+        <span class="flow-item">① MinerU（PDF → Markdown）</span>
         <span class="flow-arrow">→</span>
-        <span class="flow-item">② LLM 概念分块</span>
+        <span class="flow-item">② Chunking（语义分块）</span>
         <span class="flow-arrow">→</span>
-        <span class="flow-item">③ 树合并 / TOC 下钻</span>
+        <span class="flow-item">③ Peeling（TOC 剥离）</span>
         <span class="flow-arrow">→</span>
-        <span class="flow-item">④ 生成技能库</span>
+        <span class="flow-item">④ Skill Engine（生成技能库）</span>
       </div>
       <div class="step-text">支持断点续跑：Stage 1–3 的结果保存在 <code>outputs/&lt;书名&gt;/.checkpoint.json</code>，重跑自动跳过已完成阶段。</div>
     </div>
@@ -421,6 +421,27 @@
       </div>
     </div>
 
+    <div class="mt-md">
+      <label>断点历史（checkpoint）</label>
+      <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+        <div id="checkpoint-status" class="ckpt-status">
+          <span class="ckpt-empty">— 无历史记录 —</span>
+        </div>
+        <button class="btn btn-ghost btn-sm" onclick="loadCheckpoint()" title="重新检测 checkpoint">↻ 刷新</button>
+      </div>
+    </div>
+
+    <div class="mt-sm" style="max-width:320px">
+      <label>重新开始方式</label>
+      <select id="restart-mode">
+        <option value="continue">继续运行（断点续跑）</option>
+        <option value="from-pdf">从 PDF 解析重跑</option>
+        <option value="from-chunk">从分块重跑</option>
+        <option value="from-tree">从树合并重跑</option>
+        <option value="restart">全部清空重跑</option>
+      </select>
+    </div>
+
     <div class="run-cta">
       <button class="btn btn-primary" id="btn-start" onclick="startPipeline()">开始运行</button>
       <button class="btn btn-danger" id="btn-stop" onclick="stopPipeline()" style="display:none">停止</button>
@@ -428,51 +449,44 @@
     </div>
   </div>
 
-  <!-- ── Pipeline progress ────────────────────────────────────── -->
+  <!-- ── Pipeline progress (4-stage flow) ──────────────────────── -->
   <div class="pipeline-progress" id="pipeline-progress">
-    <div class="pipeline-step" id="step-1">
+    <div class="pipeline-step pending" id="step-mineru">
       <div class="step-dot">1</div>
       <div class="step-info">
-        <span class="step-name">Chunking</span>
-        <span class="step-detail" id="step-1-detail"></span>
+        <span class="step-name">MinerU</span>
+        <span class="step-detail" id="step-mineru-detail"></span>
       </div>
     </div>
     <div class="pipeline-connector" id="conn-1"></div>
-    <div class="pipeline-step" id="step-2">
+    <div class="pipeline-step pending" id="step-chunking">
       <div class="step-dot">2</div>
       <div class="step-info">
-        <span class="step-name">Peeling</span>
-        <span class="step-detail" id="step-2-detail"></span>
+        <span class="step-name">Chunking</span>
+        <span class="step-detail" id="step-chunking-detail"></span>
       </div>
     </div>
     <div class="pipeline-connector" id="conn-2"></div>
-    <div class="pipeline-step" id="step-3">
+    <div class="pipeline-step pending" id="step-peeling">
       <div class="step-dot">3</div>
       <div class="step-info">
+        <span class="step-name">Peeling</span>
+        <span class="step-detail" id="step-peeling-detail"></span>
+      </div>
+    </div>
+    <div class="pipeline-connector" id="conn-3"></div>
+    <div class="pipeline-step pending" id="step-skill">
+      <div class="step-dot">4</div>
+      <div class="step-info">
         <span class="step-name">Skill Engine</span>
-        <span class="step-detail" id="step-3-detail"></span>
+        <span class="step-detail" id="step-skill-detail"></span>
       </div>
     </div>
   </div>
 
-  <!-- ── MinerU Progress Card ──────────────────────────────────── -->
-  <div class="mineru-progress-card" id="mineru-progress">
-    <div class="mineru-progress-header">
-      <span class="icon">📄</span>
-      <span id="mineru-progress-label">MinerU 解析</span>
-    </div>
-    <div class="mineru-progress-track">
-      <div class="mineru-progress-fill indeterminate" id="mineru-progress-fill" style="width:0%"></div>
-    </div>
-    <div class="mineru-progress-detail">
-      <span id="mineru-progress-pages"></span>
-      <span id="mineru-progress-pct"></span>
-    </div>
-  </div>
-
-  <!-- ── MinerU Error Card ─────────────────────────────────────── -->
+  <!-- ── Pipeline Error Card (generic) ─────────────────────────── -->
   <div class="mineru-error-card" id="mineru-error">
-    <div class="mineru-error-title">⚠ MinerU 解析错误</div>
+    <div class="mineru-error-title">⚠ 流水线错误</div>
     <div class="mineru-error-code" id="mineru-error-code"></div>
     <div class="mineru-error-advice" id="mineru-error-advice"></div>
   </div>

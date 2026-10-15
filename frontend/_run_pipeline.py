@@ -8,6 +8,14 @@ from pathlib import Path
 
 sys.path.append(str(Path(__file__).parent.parent))
 
+# The frontend server reads this subprocess's log file as UTF-8.  On Windows
+# the redirected stdout would otherwise default to the locale codec (GBK),
+# producing mojibake in the log box while cmd renders it fine.  Force UTF-8
+# so the log file matches what server.py expects.
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+
 
 def main():
     """CLI entry point invoked by the frontend server's subprocess.

@@ -1,5 +1,8 @@
 """
-Minimal FastAPI backend for pdf2skill.
+DEPRECATED: legacy full-stack FastAPI backend for pdf2skill.
+Kept only for the transition period. The active architecture is the pure-frontend
+mode: TypeScript SDK (@pdf2skill/sdk) runs the whole pipeline in the browser and
+only LLM / MinerU traffic is proxied by frontend/proxy_server.py (port 8502).
 Provides: config CRUD, input file listing, pipeline execution, output browsing.
 """
 
@@ -35,6 +38,22 @@ PROVIDER_NAME_RE = re.compile(r"^[a-z0-9][a-z0-9_-]*$")
 ENV_VAR_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
 app = FastAPI(title="pdf2skill")
+
+
+@app.middleware("http")
+async def no_cache_frontend(request, call_next):
+    """Disable caching for the SPA HTML and its static assets.
+
+    The frontend is developed in place; stale cached app.js/index.html
+    cause ``null.classList`` errors when DOM ids drift between versions
+    (e.g. old JS referencing a removed ``#mineru-progress``).  Force the
+    browser to revalidate every load so updates appear immediately.
+    """
+    response = await call_next(request)
+    if request.url.path == "/" or request.url.path.startswith("/static/"):
+        response.headers["Cache-Control"] = "no-store"
+    return response
+
 
 # ── Pipeline runner state ──────────────────────────────────────────
 
@@ -598,6 +617,9 @@ def get_status(job_id: Optional[str] = None):
         # Parse MinerU structured error from log
         mineru_error = _parse_pipeline_error(log_content)
 
+        # Structured 4-stage pipeline progress
+        stages = _parse_stage_status(log_content, info["status"], mineru_progress, mineru_error)
+
         return {
             "job_id": job_id,
             "status": info["status"],
@@ -608,6 +630,7 @@ def get_status(job_id: Optional[str] = None):
             "mineru_progress": mineru_progress,
             "mineru_error": mineru_error,
             "pipeline_error": mineru_error,
+            "stages": stages,
         }
 
     jobs = [{"job_id": jid, "status": info["status"]} for jid, info in _running.items()]
@@ -654,6 +677,162 @@ def _parse_pipeline_error(log_text: str):
     return {"err_code": err_code, "message": zh_msg, "advice": advice}
 
 
+# ── Structured 4-stage progress ────────────────────────────────────
+
+_STAGE_DEFS = [
+    {"key": "mineru", "label": "MinerU"},
+    {"key": "chunking", "label": "Chunking"},
+    {"key": "peeling", "label": "Peeling"},
+    {"key": "skill", "label": "Skill Engine"},
+]
+
+# start / completed markers per stage key (log text regexes)
+_STAGE_START_RE = {
+    "mineru": re.compile(r"--- Stage 1: PDF to Markdown ---|Processing split|__MINERU_PROGRESS__"),
+    "chunking": re.compile(r"--- Stage 2: LLM Chunking Strategy ---|base chunks from checkpoint"),
+    "peeling": re.compile(r"--- Stage 3: TOC Drilling & Merging ---|Loading merged tree from checkpoint"),
+    "skill": re.compile(r"--- Stage 4: Skill Generation ---"),
+}
+_STAGE_DONE_RE = {
+    "mineru": re.compile(r"Loaded existing markdown:|Markdown already generated\. Skipping conversion\.|--- Stage 2|Original chunks saved to:"),
+    "chunking": re.compile(r"Original chunks saved to:|--- Stage 3"),
+    "peeling": re.compile(r"Peeled chunks saved to:|--- Stage 4"),
+    "skill": re.compile(r"Pipeline Execution Finished Successfully!|Pipeline finished successfully\."),
+}
+_STAGE_CHECKPOINT_RE = {
+    "mineru": re.compile(r"Loaded existing markdown:"),
+    "chunking": re.compile(r"base chunks from checkpoint"),
+    "peeling": re.compile(r"Loading merged tree from checkpoint"),
+    "skill": re.compile(r"a^"),  # Skill Engine never resumes from checkpoint
+}
+# error-type -> stage key mapping; LLMParsingError/PDF2SkillsException are
+# stage-agnostic (shared client) and get attributed to the active stage.
+_STAGE_ERROR_KEY = {
+    "MinerU": "mineru", "MinerUAuthError": "mineru", "MinerUFileError": "mineru",
+    "MinerUSizeError": "mineru", "MinerUQuotaError": "mineru", "MinerUServiceError": "mineru",
+    "MinerUAPIError": "mineru", "MinerUConversionError": "mineru",
+    "PDFSplitError": "mineru",
+    "LLMChunkingError": "chunking",
+    "MergeError": "peeling",
+    "SkillGenerationError": "skill",
+}
+
+_TQDM_PCT_RE = re.compile(r"(?:Chunking|Peeling):?\s*(\d+)%")
+
+
+def _parse_stage_status(log_text: str, job_status: str, mineru_progress: dict, error_info: dict):
+    """Derive the 4-stage pipeline progress from the subprocess log.
+
+    Args:
+        log_text: Full subprocess log content.
+        job_status: Terminal/running status from ``_running``
+            (``running``/``done``/``failed``/``stopped``).
+        mineru_progress: Parsed ``__MINERU_PROGRESS__`` marker or ``None``.
+        error_info: Parsed pipeline error (``_parse_pipeline_error``) or ``None``.
+
+    Returns:
+        List of ``[{key, label, status, detail}]`` with ``status`` in
+        ``pending``/``active``/``done``/``failed``.  ``pending`` is the
+        default (gray); ``active`` is yellow; ``done`` is green; ``failed``
+        is red and only ever set for an actual error.
+    """
+    stages = [dict(d) for d in _STAGE_DEFS]
+    for s in stages:
+        started = bool(_STAGE_START_RE[s["key"]].search(log_text))
+        completed = bool(_STAGE_DONE_RE[s["key"]].search(log_text))
+        if completed:
+            s["status"] = "done"
+        elif started:
+            s["status"] = "active"
+        else:
+            s["status"] = "pending"
+        s["detail"] = None
+
+    # Terminal status convergence
+    if job_status == "done":
+        for s in stages:
+            s["status"] = "done"
+    elif job_status == "stopped":
+        for s in stages:
+            if s["status"] != "done":
+                s["status"] = "pending"  # stop is not an error -> gray, not red
+    elif job_status == "failed":
+        failed_key = None
+        if error_info:
+            err_name = _error_type_from_log(log_text)
+            failed_key = _STAGE_ERROR_KEY.get(err_name)
+            if not failed_key and err_name in ("LLMParsingError", "PDF2SkillsException"):
+                failed_key = _active_stage_key(stages)  # active only, may be None
+        if not failed_key:
+            failed_key = _active_stage_key(stages)  # active only, may be None
+        if failed_key:
+            for s in stages:
+                if s["key"] == failed_key:
+                    s["status"] = "failed"
+                elif _stage_index(s["key"]) < _stage_index(failed_key):
+                    s["status"] = "done"
+                else:
+                    s["status"] = "pending"
+        # No failed_key (e.g. no log / no active stage): leave derived state;
+        # red is only shown for a concrete error on a reached stage.
+
+    # Per-stage detail (after convergence so checkpoint-resumed stages read done)
+    for s in stages:
+        if s["status"] != "failed" and _STAGE_CHECKPOINT_RE[s["key"]].search(log_text):
+            s["detail"] = "已从 checkpoint 恢复"
+
+    # MinerU sub-progress detail (remote mode emits __MINERU_PROGRESS__)
+    if mineru_progress:
+        phase = str(mineru_progress.get("phase", ""))
+        pct = mineru_progress.get("pct")
+        extracted = mineru_progress.get("extracted")
+        total = mineru_progress.get("total")
+        if phase == "done" or not total:
+            pass  # done handled above; fake 1/1 progress suppressed
+        else:
+            pct_str = f" · {pct}%" if isinstance(pct, int) else ""
+            stages[0]["detail"] = f"{phase} {extracted}/{total} 页{pct_str}"
+
+    # tqdm sub-progress for chunking / peeling
+    for s in stages:
+        if s["key"] in ("chunking", "peeling") and s["status"] == "active":
+            m = _TQDM_PCT_RE.search(log_text)
+            if m:
+                s["detail"] = f"{s['label']} {m.group(1)}%"
+
+    return stages
+
+
+def _error_type_from_log(log_text: str) -> str:
+    """Return the exception class name from the error line, if present."""
+    m = re.search(
+        r"(MinerU\w*Error|MinerUAPIError|MinerUConversionError|PDFSplitError"
+        r"|LLMChunkingError|MergeError|SkillGenerationError|LLMParsingError|PDF2SkillsException)",
+        log_text,
+    )
+    return m.group(1) if m else ""
+
+
+def _stage_index(key: str) -> int:
+    for i, s in enumerate(_STAGE_DEFS):
+        if s["key"] == key:
+            return i
+    return len(_STAGE_DEFS)
+
+
+def _active_stage_key(stages) -> str:
+    """Return the first active stage's key, else ``None``.
+
+    Used only to attribute a stage-agnostic error to the stage currently
+    in progress.  When nothing is active (e.g. failure before any stage
+    log line) this returns ``None`` so no stage is wrongly marked red.
+    """
+    for s in stages:
+        if s["status"] == "active":
+            return s["key"]
+    return None
+
+
 @app.get("/api/progress")
 def get_progress(job_id: str = ""):
     """Get MinerU progress for a specific job (convenience endpoint)."""
@@ -674,6 +853,58 @@ def get_progress(job_id: str = ""):
     if progress:
         return {"available": True, **progress}
     return {"available": False}
+
+
+@app.get("/api/checkpoint")
+def get_checkpoint(output_dir: str = ""):
+    """Return the checkpoint state (completed stages) for an output dir.
+
+    Args:
+        output_dir: Directory under ``OUTPUTS_DIR`` that holds a
+            ``.checkpoint.json`` (e.g. ``outputs/mybook``).
+
+    Returns:
+        ``{exists, version, completed_stages}``.  ``exists`` is ``False``
+        when the dir is empty/outside outputs/ or the checkpoint is
+        missing/corrupt.
+    """
+    if not output_dir:
+        return {"exists": False, "completed_stages": []}
+
+    base = OUTPUTS_DIR.resolve()
+    # Accept the dir as relative to the project root ("outputs/mybook")
+    # or relative to outputs/ itself ("mybook").
+    candidates = []
+    try:
+        candidates.append((PROJECT_ROOT / output_dir).resolve())
+        candidates.append((OUTPUTS_DIR / output_dir).resolve())
+    except (OSError, ValueError):
+        return {"exists": False, "completed_stages": []}
+
+    target = None
+    for cand in candidates:
+        if cand.is_relative_to(base):
+            target = cand
+            break
+    if target is None:
+        # Path traversal guard: only read checkpoints under outputs/
+        return {"exists": False, "completed_stages": []}
+
+    ckpt_file = target / ".checkpoint.json"
+    if not ckpt_file.is_file():
+        return {"exists": False, "completed_stages": []}
+
+    try:
+        with open(ckpt_file, "r", encoding="utf-8") as f:
+            data = json.load(f)
+    except (OSError, json.JSONDecodeError):
+        return {"exists": False, "completed_stages": []}
+
+    return {
+        "exists": True,
+        "version": data.get("version"),
+        "completed_stages": data.get("completed_stages", []),
+    }
 
 
 @app.post("/api/stop")
