@@ -1,0 +1,492 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>PDF2Skill</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Ccircle cx='8' cy='8' r='6' fill='%232563eb'/%3E%3C/svg%3E">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+
+<!-- ── Top Navigation ────────────────────────────────────────────── -->
+<nav class="top-nav">
+  <div class="wordmark">
+    <span class="mark"></span>
+    <span class="brand">PDF2Skill</span>
+    <span class="brand-sub">纯前端流水线 · SDK 演示</span>
+  </div>
+  <span class="health-badge bad" id="health-badge"><span class="dot"></span><span id="health-text">后端未连接</span></span>
+</nav>
+
+<!-- ── Tabs ──────────────────────────────────────────────────────── -->
+<div class="tabs">
+  <div class="tab active" data-tab="tutorial">教程</div>
+  <div class="tab" data-tab="config">配置</div>
+  <div class="tab" data-tab="run">运行</div>
+  <div class="tab" data-tab="outputs">输出</div>
+</div>
+
+<!-- ═══ Tutorial Panel ═══ -->
+<div class="panel active" id="panel-tutorial">
+  <h2>使用教程</h2>
+  <p class="subtitle">按照以下 5 个步骤，把一本 PDF 教材变成可复用的 AI 技能库。全部流水线在浏览器本地运行，后端只做 LLM / MinerU 代理。</p>
+
+  <div class="startup-card">
+    <div class="startup-title">启动方式</div>
+    <div class="startup-line">
+      ① 启动代理后端（持有 API Key）：<code>python frontend/proxy_server.py</code>（端口 8502）<br>
+      ② 启动本界面：<code>npm run dev:app</code>，浏览器访问 <code>http://localhost:5173</code><br>
+      流水线（分块 / 树剥离 / 技能生成 / 断点续传 / 文件存储）全部在浏览器内完成，输出保存在 OPFS。
+    </div>
+  </div>
+
+  <div class="tutorial-step">
+    <div class="step-num">1</div>
+    <div class="step-body">
+      <div class="step-title">项目介绍</div>
+      <div class="step-text">将 PDF 教材/文档自动转化为<strong>结构化知识索引</strong>与<strong>可复用的技能库</strong>（SKILL.md + 分块引用文件）。四阶段流水线：</div>
+      <div class="step-flow">
+        <span class="flow-item">① MinerU（PDF → Markdown）</span>
+        <span class="flow-arrow">→</span>
+        <span class="flow-item">② Chunking（语义分块）</span>
+        <span class="flow-arrow">→</span>
+        <span class="flow-item">③ Peeling（TOC 剥离）</span>
+        <span class="flow-arrow">→</span>
+        <span class="flow-item">④ Skill Engine（生成技能库）</span>
+      </div>
+      <div class="step-text">支持断点续跑：结果保存在浏览器 OPFS 的 <code>jobs/&lt;任务&gt;/.checkpoint.json</code>，重跑自动跳过已完成阶段。</div>
+    </div>
+  </div>
+
+  <div class="tutorial-step">
+    <div class="step-num">2</div>
+    <div class="step-body">
+      <div class="step-title">准备 API Key</div>
+      <div class="step-text">
+        <ul>
+          <li>在「配置」面板的 <strong>API Keys</strong> 区为每个 Provider 填入 Key（只保存在代理后端进程内，永不进入浏览器）；或在项目根目录 <code>.env</code> 中配置后重启代理。</li>
+          <li>MinerU 远程模式需要 <code>MINERU_API_KEY</code>；本地模式需要先在本地启动 MinerU 服务。</li>
+        </ul>
+      </div>
+      <div class="step-goto"><button class="btn btn-primary btn-sm" data-goto="config" data-anchor="apikey-section">前往配置 API Key →</button></div>
+    </div>
+  </div>
+
+  <div class="tutorial-step">
+    <div class="step-num">3</div>
+    <div class="step-body">
+      <div class="step-title">配置 Provider 与模型</div>
+      <div class="step-text">
+        <ul>
+          <li>在「阶段配置」中为 Chunking / Peeling / Skill Engine 三个阶段分别选择 Provider。</li>
+          <li>在「Provider 管理」中维护每个 Provider 的 <code>base_url</code>、API Key 环境变量名和三个阶段模型；可一键从服务端 <code>settings.yaml</code> 导入。</li>
+          <li>点「获取模型列表」拉取该 Provider 可用模型（需先把 Provider 同步到服务端）。</li>
+        </ul>
+      </div>
+      <div class="step-goto"><button class="btn btn-primary btn-sm" data-goto="config" data-anchor="stage-cards">前往配置 Provider →</button></div>
+    </div>
+  </div>
+
+  <div class="tutorial-step">
+    <div class="step-num">4</div>
+    <div class="step-body">
+      <div class="step-title">上传并运行</div>
+      <div class="step-text">
+        <ul>
+          <li>在「运行」面板拖拽或点击上传 PDF（≤200MB，自动校验格式/加密）或 Markdown 文件。</li>
+          <li>点「开始运行」，实时查看四阶段进度与日志；可随时停止，checkpoint 保证下次断点续跑（同一文件再次上传即自动续跑）。</li>
+        </ul>
+      </div>
+      <div class="step-goto"><button class="btn btn-primary btn-sm" data-goto="run" data-anchor="dropzone">前往上传运行 →</button></div>
+    </div>
+  </div>
+
+  <div class="tutorial-step">
+    <div class="step-num">5</div>
+    <div class="step-body">
+      <div class="step-title">查看输出与导出</div>
+      <div class="step-text">
+        <ul>
+          <li><code>full.md</code> — Stage 1 解析结果；<code>full_chunks_original/</code>、<code>full_chunks/</code> — 分块与树结构（<code>chunks_index.json</code>、<code>tree.json</code>）。</li>
+          <li><code>generated_skills/</code> — 最终技能库：<code>SKILL.md</code> 主索引 + <code>references/</code> 分块文件。</li>
+          <li>在「输出」面板点击文件预览内容，可一键下载 zip（目录结构与命令行版 <code>outputs/&lt;书名&gt;/</code> 一致）。</li>
+        </ul>
+      </div>
+      <div class="step-goto"><button class="btn btn-primary btn-sm" data-goto="outputs">前往查看输出 →</button></div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══ Config Panel ═══ -->
+<div class="panel" id="panel-config">
+  <div class="error-banner" id="config-error"></div>
+
+  <h2>Provider 配置</h2>
+  <p class="subtitle">为每个阶段选择 Provider；Provider 的地址与模型在「Provider 管理」中维护（保存在浏览器 localStorage）。API Key 只存放在代理后端。</p>
+
+  <div class="btn-bar" style="margin-bottom:16px">
+    <button class="btn btn-secondary btn-sm" id="btn-import-providers">⬇ 从服务端导入 settings.yaml</button>
+    <button class="btn btn-ghost btn-sm" id="btn-sync-providers" title="把当前 Provider 注册表写回服务端 settings.yaml（模型列表获取等服务端功能依赖它）">⬆ 同步到服务端</button>
+  </div>
+
+  <!-- ── Stage routing cards ──────────────────────────────────── -->
+  <div class="stage-cards" id="stage-cards">
+    <div class="stage-card">
+      <div><span class="stage-num">1</span><span class="stage-label">Chunking</span></div>
+      <label class="mt-sm">Provider</label>
+      <select id="chunk-provider"></select>
+      <div class="stage-model"><strong>当前模型</strong><span id="chunk-model-display">—</span></div>
+    </div>
+    <div class="stage-card">
+      <div><span class="stage-num">2</span><span class="stage-label">Peeling</span></div>
+      <label class="mt-sm">Provider</label>
+      <select id="peel-provider"></select>
+      <div class="stage-model"><strong>当前模型</strong><span id="peel-model-display">—</span></div>
+    </div>
+    <div class="stage-card">
+      <div><span class="stage-num">3</span><span class="stage-label">Skill Engine</span></div>
+      <label class="mt-sm">Provider</label>
+      <select id="skill-provider"></select>
+      <div class="stage-model"><strong>当前模型</strong><span id="skill-model-display">—</span></div>
+    </div>
+  </div>
+
+  <!-- ── Provider management ──────────────────────────────────── -->
+  <div class="section-divider">
+    <span class="section-label">Provider 管理</span>
+  </div>
+  <p class="subtitle" style="margin-top:0">管理全部 LLM Provider：base_url、API Key 环境变量名、三个阶段模型，支持新增与删除。</p>
+
+  <div id="provider-rows"></div>
+
+  <div class="provider-form" id="provider-form">
+    <h3>新增 Provider</h3>
+    <div class="form-error" id="new-provider-error"></div>
+    <div class="row">
+      <div>
+        <label>名称（小写字母/数字/连字符）</label>
+        <input type="text" id="new-provider-name" placeholder="my-provider">
+      </div>
+      <div>
+        <label>API Key 环境变量名</label>
+        <input type="text" id="new-provider-env" placeholder="MYPROVIDER_API_KEY">
+      </div>
+    </div>
+    <div class="row mt-sm">
+      <div>
+        <label>base_url（OpenAI 兼容地址）</label>
+        <input type="text" id="new-provider-base-url" placeholder="https://api.example.com/v1" style="max-width:100%">
+      </div>
+    </div>
+    <div class="row mt-sm">
+      <div>
+        <label>Chunking 模型（可选）</label>
+        <input type="text" id="new-provider-chunking" placeholder="稍后可用「获取模型列表」填入">
+      </div>
+      <div>
+        <label>Peeling 模型（可选）</label>
+        <input type="text" id="new-provider-peeling" placeholder="稍后可用「获取模型列表」填入">
+      </div>
+      <div>
+        <label>Skill Engine 模型（可选）</label>
+        <input type="text" id="new-provider-skill" placeholder="稍后可用「获取模型列表」填入">
+      </div>
+    </div>
+    <div class="form-actions">
+      <button class="btn btn-primary btn-sm" id="btn-save-new-provider">保存 Provider</button>
+      <button class="btn btn-ghost btn-sm" id="btn-cancel-new-provider">取消</button>
+    </div>
+  </div>
+  <button class="btn btn-secondary btn-sm" id="btn-add-provider">+ 新增 Provider</button>
+
+  <!-- ── PDF params ──────────────────────────────────────────── -->
+  <div class="section-divider">
+    <span class="section-label">PDF 处理参数</span>
+  </div>
+  <div class="card">
+    <div class="row">
+      <div>
+        <label>页数上限</label>
+        <input type="number" id="pdf-page-limit" min="1">
+      </div>
+      <div>
+        <label>分块合并阈值（字符）</label>
+        <input type="number" id="pdf-merge-threshold" min="0">
+      </div>
+      <div>
+        <label>分块最小阈值（字符）</label>
+        <input type="number" id="pdf-min-threshold" min="0">
+      </div>
+      <div>
+        <label>请求间隔（秒）</label>
+        <input type="number" id="request-interval" step="0.5" min="0">
+      </div>
+    </div>
+  </div>
+
+  <!-- ── API keys ────────────────────────────────────────────── -->
+  <div class="section-divider">
+    <span class="section-label">API Keys</span>
+  </div>
+  <p class="subtitle" style="margin-top:0">在此设置 Key 仅保存在代理后端进程内；写入 <code>.env</code> 可持久化（需重启代理）。Key 不会进入浏览器。</p>
+  <div class="card" id="apikey-section"></div>
+
+  <!-- ── MinerU config ────────────────────────────────────────── -->
+  <div class="section-divider">
+    <span class="section-label">MinerU 文档解析</span>
+  </div>
+  <p class="subtitle" style="margin-top:0">配置 MinerU 文档解析服务。本地模式指向自部署实例（仍经代理转发）；远程模式使用云端 API。</p>
+
+  <div class="card">
+    <label>API 模式</label>
+    <div class="toggle-row" style="margin-bottom:var(--space-md)">
+      <button class="toggle-btn active" id="mode-local">本地模式</button>
+      <button class="toggle-btn" id="mode-remote">远程模式</button>
+    </div>
+
+    <!-- Local config -->
+    <div class="mineru-sub active" id="mineru-local">
+      <div class="row">
+        <div>
+          <label>服务地址</label>
+          <input type="text" id="mu-local-url" placeholder="http://localhost:7860">
+        </div>
+        <div>
+          <label>解析引擎</label>
+          <select id="mu-local-backend">
+            <option value="vlm-auto-engine">VLM Auto</option>
+            <option value="hybrid-auto-engine">Hybrid Auto</option>
+            <option value="pipeline-auto-engine">Pipeline Auto</option>
+          </select>
+        </div>
+      </div>
+      <div class="row mt-sm">
+        <div>
+          <label>解析方法</label>
+          <select id="mu-local-parse">
+            <option value="auto">自动</option>
+            <option value="ocr">OCR</option>
+            <option value="txt">文本</option>
+          </select>
+        </div>
+        <div>
+          <label>语言</label>
+          <select id="mu-language">
+            <option value="ch">中文</option>
+            <option value="en">英文</option>
+            <option value="korean">韩文</option>
+            <option value="japan">日文</option>
+            <option value="chinese_cht">繁体中文</option>
+          </select>
+        </div>
+      </div>
+      <div class="row mt-sm">
+        <div>
+          <label style="display:inline-flex;align-items:center;gap:6px;cursor:pointer">
+            <input type="checkbox" id="mu-local-formula" checked> 识别公式
+          </label>
+        </div>
+        <div>
+          <label style="display:inline-flex;align-items:center;gap:6px;cursor:pointer">
+            <input type="checkbox" id="mu-local-table" checked> 识别表格
+          </label>
+        </div>
+      </div>
+    </div>
+
+    <!-- Remote config -->
+    <div class="mineru-sub" id="mineru-remote">
+      <div class="key-row" style="margin-bottom:var(--space-md)">
+        <strong>MINERU_API_KEY</strong>
+        <span class="key-badge key-missing" id="mu-key-badge">✗ 未设置</span>
+        <input type="password" id="mu-api-key" placeholder="MINERU_API_KEY" style="max-width:240px">
+        <button class="btn btn-sm btn-primary" id="btn-set-mu-key">设置</button>
+      </div>
+      <div class="row">
+        <div>
+          <label>模型版本</label>
+          <select id="mu-remote-model">
+            <option value="vlm">VLM（推荐）</option>
+            <option value="pipeline">Pipeline</option>
+          </select>
+        </div>
+        <div>
+          <label>页码范围（可选）</label>
+          <input type="text" id="mu-remote-pages" placeholder="如 1-10,15-20">
+        </div>
+      </div>
+      <div class="row mt-sm">
+        <div>
+          <label>语言</label>
+          <select id="mu-language-remote">
+            <option value="ch">中文</option>
+            <option value="en">英文</option>
+            <option value="korean">韩文</option>
+            <option value="japan">日文</option>
+            <option value="chinese_cht">繁体中文</option>
+          </select>
+        </div>
+        <div></div>
+      </div>
+      <div class="row mt-sm">
+        <div>
+          <label style="display:inline-flex;align-items:center;gap:6px;cursor:pointer">
+            <input type="checkbox" id="mu-remote-ocr"> 启用 OCR
+          </label>
+        </div>
+        <div>
+          <label style="display:inline-flex;align-items:center;gap:6px;cursor:pointer">
+            <input type="checkbox" id="mu-remote-formula" checked> 识别公式
+          </label>
+        </div>
+        <div>
+          <label style="display:inline-flex;align-items:center;gap:6px;cursor:pointer">
+            <input type="checkbox" id="mu-remote-table" checked> 识别表格
+          </label>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="mt-lg">
+    <button class="btn btn-primary" id="btn-save-config">保存配置</button>
+  </div>
+</div>
+
+<!-- ═══ Run Panel ═══ -->
+<div class="panel" id="panel-run">
+  <h2>运行 Pipeline</h2>
+  <p class="subtitle">选择输入文件并启动处理流程。同一文件重复运行会自动断点续跑。</p>
+
+  <!-- ── Upload Card ──────────────────────────────────────────── -->
+  <div class="card" id="upload-card">
+    <h3 style="margin-bottom:12px">选择输入文件</h3>
+    <div class="file-input-zone" id="dropzone">
+      <div class="zone-icon">📄</div>
+      <div class="zone-text">拖拽 PDF / Markdown 文件到此处，或点击选择</div>
+      <div class="zone-hint">支持 .pdf / .md 格式，PDF 单文件最大 200MB（文件不离开浏览器）</div>
+      <input type="file" id="upload-input" accept=".pdf,.md" style="display:none">
+    </div>
+    <div class="upload-error-card" id="upload-error" style="display:none">
+      <div class="upload-error-title" id="upload-error-title"></div>
+      <div class="upload-error-advice" id="upload-error-advice"></div>
+    </div>
+
+    <div class="mt-sm" id="selected-file" style="display:none">
+      <span id="selected-file-name" style="font-weight:600"></span>
+      <span id="selected-file-size" style="color:var(--muted);margin-left:8px"></span>
+    </div>
+
+    <div class="row mt-md">
+      <div>
+        <label>输入模式</label>
+        <select id="input-mode">
+          <option value="pdf">PDF（MinerU 解析）</option>
+          <option value="markdown">Markdown（跳过解析）</option>
+        </select>
+      </div>
+      <div>
+        <label>运行方式</label>
+        <select id="restart-mode">
+          <option value="continue">继续运行（断点续跑）</option>
+          <option value="from-pdf">从 PDF 解析重跑</option>
+          <option value="from-chunk">从分块重跑</option>
+          <option value="from-tree">从树合并重跑</option>
+          <option value="restart">全部清空重跑</option>
+        </select>
+      </div>
+    </div>
+
+    <div class="run-cta">
+      <button class="btn btn-primary" id="btn-start">开始运行</button>
+      <button class="btn btn-danger" id="btn-stop" style="display:none">停止</button>
+      <span id="run-status"></span>
+    </div>
+  </div>
+
+  <!-- ── Pipeline progress (4-stage flow) ──────────────────────── -->
+  <div class="pipeline-progress" id="pipeline-progress">
+    <div class="pipeline-step pending" id="step-mineru">
+      <div class="step-dot">1</div>
+      <div class="step-info">
+        <span class="step-name">MinerU</span>
+        <span class="step-detail" id="step-mineru-detail"></span>
+      </div>
+    </div>
+    <div class="pipeline-connector" id="conn-1"></div>
+    <div class="pipeline-step pending" id="step-chunking">
+      <div class="step-dot">2</div>
+      <div class="step-info">
+        <span class="step-name">Chunking</span>
+        <span class="step-detail" id="step-chunking-detail"></span>
+      </div>
+    </div>
+    <div class="pipeline-connector" id="conn-2"></div>
+    <div class="pipeline-step pending" id="step-peeling">
+      <div class="step-dot">3</div>
+      <div class="step-info">
+        <span class="step-name">Peeling</span>
+        <span class="step-detail" id="step-peeling-detail"></span>
+      </div>
+    </div>
+    <div class="pipeline-connector" id="conn-3"></div>
+    <div class="pipeline-step pending" id="step-skill">
+      <div class="step-dot">4</div>
+      <div class="step-info">
+        <span class="step-name">Skill Engine</span>
+        <span class="step-detail" id="step-skill-detail"></span>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── Pipeline Error Card ───────────────────────────────────── -->
+  <div class="mineru-error-card" id="mineru-error">
+    <div class="mineru-error-title">⚠ 流水线错误</div>
+    <div class="mineru-error-code" id="mineru-error-code"></div>
+    <div class="mineru-error-advice" id="mineru-error-advice"></div>
+  </div>
+
+  <h3 class="mt-lg">运行日志</h3>
+  <div class="log-box" id="log-box">
+    <div class="log-placeholder">
+      <div class="log-placeholder-icon">⌘</div>
+      选择文件并点击「开始运行」
+    </div>
+  </div>
+</div>
+
+<!-- ═══ Outputs Panel ═══ -->
+<div class="panel" id="panel-outputs">
+  <h2>输出浏览</h2>
+  <p class="subtitle">浏览浏览器 OPFS 中的任务输出，点击文件名预览内容，可下载 zip 或删除任务。</p>
+
+  <div class="outputs-header">
+    <div class="btn-bar">
+      <select class="job-select" id="job-select"><option value="">— 选择任务 —</option></select>
+      <button class="btn btn-primary btn-sm" id="btn-download-zip">⬇ 下载 zip</button>
+      <button class="btn btn-danger btn-sm" id="btn-delete-job">🗑 删除任务</button>
+    </div>
+    <button class="btn btn-ghost btn-sm" id="btn-refresh-outputs">↻ 刷新</button>
+  </div>
+
+  <div class="card">
+    <div class="tree" id="output-tree">
+      <div class="outputs-empty">
+        <div class="empty-icon">📂</div>
+        <div class="empty-title">暂无输出</div>
+        <div class="empty-desc">运行 Pipeline 后，输出文件将显示在这里</div>
+      </div>
+    </div>
+  </div>
+  <div class="file-viewer" id="file-viewer"></div>
+</div>
+
+<!-- ── Toast ────────────────────────────────────────────────────── -->
+<div class="saved-toast" id="toast">✓ 已保存</div>
+
+<script type="module" src="/src/main.ts"></script>
+</body>
+</html>

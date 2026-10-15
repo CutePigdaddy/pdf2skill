@@ -62,5 +62,20 @@ docs/api/
 # ── Frontend runtime artifacts ────────────────────────────────────
 frontend/screenshot_*.png
 
+# ── Node / TypeScript ──────────────────────────────────────────────
+node_modules/
+*.tsbuildinfo
+# dist/ already ignored above (Python build) and also covers packages/*/dist
+
+# scripts/ rule above is for ad-hoc Python scripts; keep SDK build scripts tracked
+!packages/sdk/scripts/
+# SDK prompt copies are generated from root prompts/ by sync-prompts.mjs
+packages/sdk/src/prompts/
+
+# ── Python↔TS alignment scratch outputs (regenerable fixtures) ─────
+.m4align/py_out/
+.m4align/ts_out/
+.m4align/*_prompts.json
+
 # ── Claude Code session files ─────────────────────────────────────
 .claude/

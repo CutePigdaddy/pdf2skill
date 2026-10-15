@@ -1,0 +1,17 @@
+{
+  "name": "pdf2skill-monorepo",
+  "private": true,
+  "version": "1.0.0",
+  "workspaces": [
+    "packages/*"
+  ],
+  "scripts": {
+    "dev:app": "npm run dev -w @pdf2skill/app",
+    "dev:proxy": "python frontend/proxy_server.py",
+    "build": "npm run build -w @pdf2skill/sdk && npm run build -w @pdf2skill/app",
+    "test": "npm run test -w @pdf2skill/sdk"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

@@ -10,21 +10,22 @@
 - **技能生成**：为每个 chunk 提取关键词标签，生成 SKILL.md 主索引和独立参考文件
 - **OpenAI 兼容**：所有 LLM 请求走 OpenAI Chat Completions 格式，支持任意兼容供应商
 - **断点续传**：checkpoint 机制支持中断后续传、`--from-stage` 选择性重跑、`--restart` 全部重来
-- **Web 界面**：FastAPI 后端 + SPA 前端，配置/运行/输出一站式操作
+- **纯前端模式**：TypeScript SDK（`@pdf2skill/sdk`）在浏览器内完成全部流水线（OPFS 存储、断点续传、zip 导出），后端只做 LLM / MinerU 代理
+- **Web 界面**：Vite + TS 演示界面，配置/运行/输出一站式操作（旧版 FastAPI 全栈界面已弃用，见 `frontend/server.py`）
 
 ## Pipeline 概览
 
 ```
-PDF ──► Markdown ──► 语义分块 ──► TOC 剥离 ──► 技能生成
-  Stage 1          Stage 2        Stage 3        Stage 4
- (MinerU)         (LLM)          (LLM)          (LLM)
-                  ✓ checkpoint   ✓ checkpoint
+PDF ──► MinerU ──► Chunking ──► Peeling ──► Skill Engine
+  Stage 1      Stage 2       Stage 3      Stage 4
+ (MinerU)     (LLM)         (LLM)        (LLM)
+              ✓ checkpoint  ✓ checkpoint
 ```
 
-- Stage 1：调用 MinerU（remote API 或 local Gradio）将 PDF 转为 Markdown
-- Stage 2：LLM 分析全文目录结构，生成语义分块策略
-- Stage 3：递归剥离超过阈值的大块，生成最终 chunk 树
-- Stage 4：为每个 chunk 生成 SKILL.md 索引和参考文件（每次都重跑）
+- Stage 1 (MinerU)：调用 MinerU（remote API 或 local Gradio）将 PDF 转为 Markdown
+- Stage 2 (Chunking)：LLM 分析全文目录结构，生成语义分块策略
+- Stage 3 (Peeling)：递归剥离超过阈值的大块（TOC 剥离），生成最终 chunk 树
+- Stage 4 (Skill Engine)：为每个 chunk 生成 SKILL.md 索引和参考文件（每次都重跑）
 
 ## 快速开始
 
@@ -85,7 +86,67 @@ python frontend/server.py
 # 浏览器访问 http://localhost:8501
 ```
 
-Web 界面支持：配置 Provider/Model、在线设置 API Key、选择文件一键运行、实时日志、输出浏览。
+> ⚠️ 旧版 Web 界面（`frontend/server.py`）已弃用，仅过渡期保留。推荐使用下方的**纯前端模式**。
+
+## 纯前端模式（SDK + 演示界面）
+
+除 Python CLI 外，项目提供 TypeScript SDK：流水线四阶段（分块 / 树剥离 / 技能生成）、PDF 校验、checkpoint 断点续传、文件存储（OPFS）、zip 导出**全部在浏览器内完成**。后端瘦身为纯代理，只做两件事：
+
+1. **LLM 转发**（`POST /api/llm/chat`）——持有 API Key，Key 永不进入浏览器
+2. **MinerU 转发**（`/api/mineru/*`）——官方 API 与自部署 Gradio 全部经代理访问
+
+### 启动
+
+```bash
+npm install
+
+# ① 启动代理后端（端口 8502，读取 .env 与 config/settings.yaml）
+python frontend/proxy_server.py
+
+# ② 启动演示界面（新终端）
+npm run dev:app
+# 浏览器访问 http://localhost:5173
+```
+
+### 在自己的前端项目中使用 SDK
+
+```bash
+npm install @pdf2skill/sdk jszip pdf-lib pdfjs-dist
+```
+
+```ts
+import { Pdf2Skill } from '@pdf2skill/sdk';
+
+const pdf2skill = new Pdf2Skill({
+  config: {
+    providers: { 'my-provider': { base_url: 'https://api.example.com/v1', api_key_env: 'MY_KEY' } },
+    routers: { chunking: 'my-provider', peeling: 'my-provider', skillEngine: 'my-provider' },
+  },
+});
+
+pdf2skill.on('stage', (e) => console.log(e.stage, e.status, e.percent));
+pdf2skill.on('log', (msg) => console.log(msg));
+
+// 运行（PDF 或 Markdown 直接导入）
+const result = await pdf2skill.run({
+  kind: 'markdown',
+  file: new File([text], 'book.md', { type: 'text/markdown' }),
+  name: 'book.md',
+});
+
+// 任务管理 / 输出浏览 / 导出
+const jobs = await pdf2skill.listJobs();
+const tree = await pdf2skill.listOutputTree(jobs[0].jobId);
+const zip = await pdf2skill.exportZip(jobs[0].jobId); // Blob，可直接触发下载
+```
+
+SDK 通过同源后端 `/api/llm/chat` 与 `/api/mineru/*` 调用 LLM 与 MinerU，部署时需保证页面与代理后端同源（或同域反代）。中断后重新运行同一文件自动从 checkpoint 续跑；`abort()`、`resume()`、`deleteJob()` 语义与 CLI 一致。
+
+### SDK 测试
+
+```bash
+npm test   # vitest，88 个用例（分块 / 剥离 / 技能生成 / 流水线 / 门面 / 与 Python 录制回放逐字节对齐）
+```
 
 ## 配置
 
@@ -214,14 +275,25 @@ config/
   config.py              # 配置单例（双层合并：yaml + env）
 core/
   pdf_processor.py       # Stage 1: MinerU remote/local
-  llm_chunker.py         # Stage 2: LLM 语义分块
-  tree_merger.py         # Stage 3: TOC 剥离 + 树合并
-  skill_engine.py        # Stage 4: 技能生成
+  llm_chunker.py         # Stage 2: Chunking 语义分块
+  tree_merger.py         # Stage 3: Peeling TOC 剥离
+  skill_engine.py        # Stage 4: Skill Engine 技能生成
   onboarding.py          # 首次运行引导向导
 frontend/
-  server.py              # FastAPI 后端
-  _run_pipeline.py       # 子进程 Pipeline 执行器
-  static/index.html      # SPA 前端
+  server.py              # 旧版 FastAPI 全栈后端（已弃用，过渡期保留）
+  proxy_server.py        # 纯前端模式的瘦代理后端（LLM / MinerU 转发）
+  static/index.html      # 旧版 SPA 前端（已弃用）
+packages/
+  sdk/                   # @pdf2skill/sdk：浏览器端流水线 SDK（Vite lib mode）
+    src/
+      pipeline.ts        # 四阶段编排（对应 main.py run_pipeline）
+      pdf2skill.ts       # Pdf2Skill 门面类
+      stages/            # llmChunker / treeMerger / skillEngine
+      mineru/            # MinerU 客户端 + zip 解压（经代理）
+      storage/           # OPFS 封装 + checkpoint
+      export/zip.ts      # zip 导出
+    test/                # vitest 单测 + 与 Python 的录制回放对齐测试
+  app/                   # @pdf2skill/app：纯前端演示界面（Vite + TS，4 Tab）
 utils/
   logger.py              # 日志 + PDF2SkillsException
   llm_client.py          # OpenAI 兼容 LLM 客户端
