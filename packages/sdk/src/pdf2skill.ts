@@ -71,8 +71,9 @@ export class Pdf2Skill {
     }
   }
 
+  /** A deep copy — mutating it has no effect until passed to `configure()`. */
   getConfig(): Pdf2SkillConfig {
-    return this.config;
+    return structuredClone(this.config);
   }
 
   // ── events ──────────────────────────────────────────────────────────

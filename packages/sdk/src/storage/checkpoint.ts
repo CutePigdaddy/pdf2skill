@@ -1,4 +1,4 @@
-import { fileExists, readText, writeText } from './opfs';
+import { fileExists, readText, writeTextAtomic } from './opfs';
 
 export const CHECKPOINT_VERSION = 1;
 
@@ -49,7 +49,7 @@ export class CheckpointManager {
 
   async save(): Promise<void> {
     this.state.version = CHECKPOINT_VERSION;
-    await writeText(this.dir, this.fileName, JSON.stringify(this.state, null, 2));
+    await writeTextAtomic(this.dir, this.fileName, JSON.stringify(this.state, null, 2));
   }
 
   async markStageCompleted(stageName: string, stageData?: Record<string, unknown>): Promise<void> {

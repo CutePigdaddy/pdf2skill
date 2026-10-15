@@ -22,19 +22,21 @@ All errors use the structured envelope {ok: false, error: {code, message, advice
 (mostly with HTTP 200 so the frontend can render them uniformly).
 """
 
+import ipaddress
 import os
 import re
 import shutil
 import tempfile
 from pathlib import Path
 from typing import Optional
+from urllib.parse import urlparse
 
 import requests
 import yaml
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException, Request, UploadFile, File, Form
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import Response
+from fastapi.responses import JSONResponse, Response
 
 load_dotenv(Path(__file__).parent.parent / ".env")
 
@@ -45,14 +47,68 @@ MINERU_BASE_URL = "https://mineru.net/api/v4"
 PROVIDER_NAME_RE = re.compile(r"^[a-z0-9][a-z0-9_-]*$")
 ENV_VAR_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
+# Browsers send Origin on every cross-origin (and same-origin POST/PUT)
+# request; a disallowed page could otherwise drive the proxy with a
+# no-preflight text/plain POST and exfiltrate keys. Non-browser clients
+# (curl) send no Origin and pass. Extend via PDF2SKILL_ALLOWED_ORIGINS.
+ALLOWED_ORIGINS = ["http://localhost:5173", "http://127.0.0.1:5173"]
+ALLOWED_ORIGINS += [
+    o.strip()
+    for o in os.getenv("PDF2SKILL_ALLOWED_ORIGINS", "").split(",")
+    if o.strip()
+]
+
 app = FastAPI(title="pdf2skill-proxy")
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],
+    allow_origins=ALLOWED_ORIGINS,
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+@app.middleware("http")
+async def _check_origin(request: Request, call_next):
+    if request.method in ("POST", "PUT", "DELETE", "PATCH"):
+        origin = request.headers.get("origin")
+        if origin:
+            # Same-origin requests (incl. same-host reverse proxies) always
+            # pass; everything else must be on the explicit allowlist.
+            same_origin = urlparse(origin).netloc == request.headers.get("host", "")
+            if not same_origin and origin not in ALLOWED_ORIGINS:
+                return JSONResponse(
+                    status_code=403,
+                    content=_err_payload(
+                        "FORBIDDEN_ORIGIN",
+                        f"来源 {origin} 未被允许访问代理后端",
+                        "请从与代理后端同源的页面访问，或用 PDF2SKILL_ALLOWED_ORIGINS 追加允许的来源",
+                    ),
+                )
+    return await call_next(request)
+
+
+def _reject_unsafe_outbound_url(url: str) -> None:
+    """Outbound relay targets (MinerU signed upload/result URLs) must be
+    public — never loopback/LAN — so the proxy can't be used as an SSRF
+    pivot. DNS names are not resolved here (rebinding is out of scope)."""
+    host = (urlparse(url).hostname or "").lower()
+    unsafe = host == "localhost" or host.endswith(".localhost") or host.endswith(".local")
+    if not unsafe:
+        try:
+            ip = ipaddress.ip_address(host)
+            unsafe = (
+                ip.is_private or ip.is_loopback or ip.is_link_local
+                or ip.is_reserved or ip.is_multicast or ip.is_unspecified
+            )
+        except ValueError:
+            unsafe = False
+    if unsafe:
+        raise HTTPException(400, _err_payload(
+            "INVALID_URL_TARGET",
+            f"拒绝访问内网地址: {host}",
+            "该端点仅用于转发 MinerU 签发的公网链接",
+        ))
 
 
 # ── settings.yaml helpers (same atomic-write pattern as server.py) ──
@@ -436,7 +492,9 @@ async def mineru_upload(request: Request, url: str):
     """Stream the PDF bytes from the browser to MinerU's signed upload URL."""
     body = await request.body()
     if not url.startswith(("http://", "https://")):
-        raise HTTPException(400, "invalid url")
+        raise HTTPException(400, _err_payload(
+            "INVALID_URL", "上传地址不合法", "请传入 MinerU 返回的 http(s) 上传地址"))
+    _reject_unsafe_outbound_url(url)
     try:
         resp = requests.put(url, data=body, timeout=(5, 300))
     except requests.RequestException as e:
@@ -467,7 +525,9 @@ def mineru_results(batch_id: str):
 def mineru_download(url: str):
     """Download the result ZIP from MinerU and stream it to the browser."""
     if not url.startswith(("http://", "https://")):
-        raise HTTPException(400, "invalid url")
+        raise HTTPException(400, _err_payload(
+            "INVALID_URL", "下载地址不合法", "请传入 MinerU 返回的 http(s) 下载地址"))
+    _reject_unsafe_outbound_url(url)
     try:
         resp = requests.get(url, timeout=(5, 300))
     except requests.RequestException as e:
@@ -516,44 +576,51 @@ async def mineru_local(
 
     base_url = base_url.rstrip("/")
     if not base_url.startswith(("http://", "https://")):
-        raise HTTPException(400, "invalid base_url")
+        raise HTTPException(400, _err_payload(
+            "INVALID_BASE_URL", "本地 MinerU 地址不合法", "该地址应以 http:// 或 https:// 开头"))
+    # base_url is deliberately unrestricted here: self-hosted MinerU
+    # instances commonly live on the LAN, which is the feature this
+    # endpoint exists for.
 
     tmp_dir = tempfile.mkdtemp(prefix="pdf2skill_mineru_")
-    tmp_pdf = Path(tmp_dir) / (file.filename or "input.pdf")
-    with open(tmp_pdf, "wb") as f:
-        shutil.copyfileobj(file.file, f)
-
-    gradio_lang = _GRADIO_LANG_MAP.get(language, _GRADIO_LANG_MAP["ch"])
     try:
-        client = Client(base_url)
-    except Exception as e:
-        raise HTTPException(200, _err_payload("MINERU_LOCAL_CONN",
-                                              f"无法连接到本地 MinerU 服务 ({base_url}): {e}",
-                                              "请确认自部署 MinerU 服务正在运行且地址正确"))
-    try:
-        result = client.predict(
-            file_path=handle_file(str(tmp_pdf)),
-            end_pages=1000,
-            is_ocr=False,
-            formula_enable=formula_enable,
-            table_enable=table_enable,
-            language=gradio_lang,
-            backend=backend,
-            url="http://localhost:30000",
-            api_name="/convert_to_markdown_stream",
-        )
-    except Exception as e:
-        raise HTTPException(200, _err_payload("MINERU_LOCAL_PREDICT", f"本地 MinerU 解析失败: {e}",
-                                              "请检查自部署 MinerU 服务日志"))
+        tmp_pdf = Path(tmp_dir) / Path(file.filename or "input.pdf").name
+        with open(tmp_pdf, "wb") as f:
+            shutil.copyfileobj(file.file, f)
 
-    zip_path = result[1] if isinstance(result, (tuple, list)) and len(result) > 1 else None
-    if not zip_path or not os.path.exists(zip_path):
-        raise HTTPException(200, _err_payload("MINERU_LOCAL_RESULT",
-                                              f"本地 MinerU 未返回有效的 ZIP: {result}",
-                                              "请检查自部署 MinerU 服务版本是否匹配"))
-    with open(zip_path, "rb") as f:
-        zip_bytes = f.read()
-    return Response(content=zip_bytes, media_type="application/zip")
+        gradio_lang = _GRADIO_LANG_MAP.get(language, _GRADIO_LANG_MAP["ch"])
+        try:
+            client = Client(base_url)
+        except Exception as e:
+            raise HTTPException(200, _err_payload("MINERU_LOCAL_CONN",
+                                                  f"无法连接到本地 MinerU 服务 ({base_url}): {e}",
+                                                  "请确认自部署 MinerU 服务正在运行且地址正确"))
+        try:
+            result = client.predict(
+                file_path=handle_file(str(tmp_pdf)),
+                end_pages=1000,
+                is_ocr=False,
+                formula_enable=formula_enable,
+                table_enable=table_enable,
+                language=gradio_lang,
+                backend=backend,
+                url="http://localhost:30000",
+                api_name="/convert_to_markdown_stream",
+            )
+        except Exception as e:
+            raise HTTPException(200, _err_payload("MINERU_LOCAL_PREDICT", f"本地 MinerU 解析失败: {e}",
+                                                  "请检查自部署 MinerU 服务日志"))
+
+        zip_path = result[1] if isinstance(result, (tuple, list)) and len(result) > 1 else None
+        if not zip_path or not os.path.exists(zip_path):
+            raise HTTPException(200, _err_payload("MINERU_LOCAL_RESULT",
+                                                  f"本地 MinerU 未返回有效的 ZIP: {result}",
+                                                  "请检查自部署 MinerU 服务版本是否匹配"))
+        with open(zip_path, "rb") as f:
+            zip_bytes = f.read()
+        return Response(content=zip_bytes, media_type="application/zip")
+    finally:
+        shutil.rmtree(tmp_dir, ignore_errors=True)
 
 
 if __name__ == "__main__":

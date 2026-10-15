@@ -70,6 +70,36 @@ export async function writeText(
   await writeBytes(dir, name, new TextEncoder().encode(text));
 }
 
+/**
+ * Write text through a temp file and atomically replace the target when the
+ * browser exposes FileSystemFileHandle.move (mirrors Python's
+ * ``.json.tmp`` + ``os.replace``); otherwise fall back to a direct write.
+ */
+export async function writeTextAtomic(
+  dir: FileSystemDirectoryHandle,
+  name: string,
+  text: string,
+): Promise<void> {
+  const tmpName = `${name}.tmp`;
+  try {
+    const tmp = await dir.getFileHandle(tmpName, { create: true });
+    const writable = await tmp.createWritable();
+    await writable.write(new TextEncoder().encode(text));
+    await writable.close();
+    const move = (tmp as FileSystemFileHandle & {
+      move?: (parent: FileSystemDirectoryHandle, newName: string) => Promise<void>;
+    }).move;
+    if (typeof move === 'function') {
+      await move.call(tmp, dir, name);
+      return;
+    }
+  } catch {
+    // Fall through to the direct write below.
+  }
+  await writeText(dir, name, text);
+  await removeEntry(dir, tmpName).catch(() => {});
+}
+
 export async function readBytes(
   dir: FileSystemDirectoryHandle,
   name: string,

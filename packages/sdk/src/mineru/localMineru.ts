@@ -63,14 +63,16 @@ export class LocalMinerUClient {
       );
     }
 
-    const errBody = (await resp.json().catch(() => null)) as
-      | { detail?: { error?: { code: string; message: string; advice?: string } } }
-      | null;
-    if (!resp.ok && errBody?.detail?.error) {
-      const err = errBody.detail.error;
-      throw new Pdf2SkillError(err.code, err.message, err.advice ?? '', 'mineru');
-    }
+    // A Response body can only be read once: parse the error envelope before
+    // touching the body on the success path.
     if (!resp.ok) {
+      const errBody = (await resp.json().catch(() => null)) as
+        | { detail?: { error?: { code: string; message: string; advice?: string } } }
+        | null;
+      if (errBody?.detail?.error) {
+        const err = errBody.detail.error;
+        throw new Pdf2SkillError(err.code, err.message, err.advice ?? '', 'mineru');
+      }
       throw new Pdf2SkillError(
         'MINERU_LOCAL_PREDICT',
         `本地 MinerU 请求失败 (HTTP ${resp.status})`,

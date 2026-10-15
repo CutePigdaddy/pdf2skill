@@ -52,7 +52,11 @@ export function mergeConfig(base: Pdf2SkillConfig, patch: unknown): Pdf2SkillCon
   const out: Record<string, unknown> = { ...base };
   for (const [k, v] of Object.entries(patch)) {
     const cur = (base as unknown as Record<string, unknown>)[k];
-    if (isPlainObject(v) && isPlainObject(cur)) {
+    if (k === 'providers' && isPlainObject(v)) {
+      // The provider registry is replace-only: deletions (remove provider)
+      // and import-from-server must be expressible, which key-merge forbids.
+      out[k] = v;
+    } else if (isPlainObject(v) && isPlainObject(cur)) {
       out[k] = mergeConfig(cur as never, v);
     } else if (v !== undefined) {
       out[k] = v;

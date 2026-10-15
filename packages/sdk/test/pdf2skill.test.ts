@@ -204,3 +204,30 @@ describe('Pdf2Skill facade', () => {
     await expect(sdk.resume('missing-job')).rejects.toMatchObject({ code: 'JOB_NOT_FOUND' });
   });
 });
+
+describe('Pdf2Skill config semantics', () => {
+  it('getConfig returns a copy — mutations do not leak into the SDK', () => {
+    const { sdk } = makeSdk();
+    const cfg = sdk.getConfig();
+    cfg.providers.evil = { base_url: 'https://evil.example.com', api_key_env: 'X' };
+    cfg.pdf.page_limit = 99999;
+
+    const fresh = sdk.getConfig();
+    expect(fresh.providers.evil).toBeUndefined();
+    expect(fresh.pdf.page_limit).not.toBe(99999);
+  });
+
+  it('configure replaces the provider registry so deletions stick', () => {
+    const { sdk } = makeSdk();
+    sdk.configure({
+      providers: {
+        a: { base_url: 'https://a.example.com', api_key_env: 'A_KEY' },
+        b: { base_url: 'https://b.example.com', api_key_env: 'B_KEY' },
+      },
+    });
+    expect(Object.keys(sdk.getConfig().providers).sort()).toEqual(['a', 'b']);
+
+    sdk.configure({ providers: { b: sdk.getConfig().providers.b } });
+    expect(Object.keys(sdk.getConfig().providers)).toEqual(['b']);
+  });
+});
