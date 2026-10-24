@@ -26,7 +26,9 @@ import ipaddress
 import os
 import re
 import shutil
+import socket
 import tempfile
+import time
 from pathlib import Path
 from typing import Optional
 from urllib.parse import urlparse
@@ -36,7 +38,7 @@ import yaml
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException, Request, UploadFile, File, Form
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse, Response
+from fastapi.responses import JSONResponse, Response, StreamingResponse
 
 load_dotenv(Path(__file__).parent.parent / ".env")
 
@@ -46,6 +48,7 @@ MINERU_BASE_URL = "https://mineru.net/api/v4"
 
 PROVIDER_NAME_RE = re.compile(r"^[a-z0-9][a-z0-9_-]*$")
 ENV_VAR_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+_MAX_UPLOAD_BYTES = 200 * 1024 * 1024
 
 # Browsers send Origin on every cross-origin (and same-origin POST/PUT)
 # request; a disallowed page could otherwise drive the proxy with a
@@ -58,6 +61,17 @@ ALLOWED_ORIGINS += [
     if o.strip()
 ]
 
+# Host header allowlist — DNS rebinding defense. The same-origin exemption in
+# the Origin check below is only safe when the Host itself is trusted: a
+# rebound page sends Host=attacker.com:8502 which matches its own Origin, so
+# "Origin == Host" alone must never be the gate.
+ALLOWED_HOSTS = {"127.0.0.1:8502", "localhost:8502"}
+ALLOWED_HOSTS |= {
+    h.strip().lower()
+    for h in os.getenv("PDF2SKILL_ALLOWED_HOSTS", "").split(",")
+    if h.strip()
+}
+
 app = FastAPI(title="pdf2skill-proxy")
 
 app.add_middleware(
@@ -69,14 +83,26 @@ app.add_middleware(
 
 
 @app.middleware("http")
-async def _check_origin(request: Request, call_next):
+async def _check_host_and_origin(request: Request, call_next):
+    # Applies to every method: a rebound page is same-origin for the browser,
+    # so GET responses are readable too.
+    host = (request.headers.get("host") or "").lower()
+    if host not in ALLOWED_HOSTS:
+        return JSONResponse(
+            status_code=403,
+            content=_err_payload(
+                "FORBIDDEN_HOST",
+                f"Host '{host or '(缺失)'}' 不在允许列表中",
+                "请通过 http://127.0.0.1:8502 或 http://localhost:8502 访问；"
+                "如经反向代理换端口，请用 PDF2SKILL_ALLOWED_HOSTS 追加",
+            ),
+        )
     if request.method in ("POST", "PUT", "DELETE", "PATCH"):
         origin = request.headers.get("origin")
-        if origin:
-            # Same-origin requests (incl. same-host reverse proxies) always
-            # pass; everything else must be on the explicit allowlist.
-            same_origin = urlparse(origin).netloc == request.headers.get("host", "")
-            if not same_origin and origin not in ALLOWED_ORIGINS:
+        if origin and origin not in ALLOWED_ORIGINS:
+            # Host is already allowlisted, so same-host requests are covered
+            # above; any other Origin must be on the explicit allowlist.
+            if urlparse(origin).netloc != host:
                 return JSONResponse(
                     status_code=403,
                     content=_err_payload(
@@ -88,26 +114,61 @@ async def _check_origin(request: Request, call_next):
     return await call_next(request)
 
 
+def _is_unsafe_host(host: str) -> bool:
+    """True for loopback/LAN/link-local/reserved/multicast targets.
+
+    Non-standard numeric hostnames (127.1, 0x7f000001, 2130706433) fail
+    ip_address() parsing but still resolve to loopback on common platforms,
+    so they are rejected via inet_aton as well."""
+    host = (host or "").lower()
+    if not host:
+        return True
+    if host == "localhost" or host.endswith(".localhost") or host.endswith(".local"):
+        return True
+    try:
+        ip = ipaddress.ip_address(host)
+    except ValueError:
+        try:
+            socket.inet_aton(host)
+        except (OSError, AttributeError):
+            return False
+        return True
+    return (
+        ip.is_private or ip.is_loopback or ip.is_link_local
+        or ip.is_reserved or ip.is_multicast or ip.is_unspecified
+    )
+
+
 def _reject_unsafe_outbound_url(url: str) -> None:
     """Outbound relay targets (MinerU signed upload/result URLs) must be
     public — never loopback/LAN — so the proxy can't be used as an SSRF
     pivot. DNS names are not resolved here (rebinding is out of scope)."""
-    host = (urlparse(url).hostname or "").lower()
-    unsafe = host == "localhost" or host.endswith(".localhost") or host.endswith(".local")
-    if not unsafe:
-        try:
-            ip = ipaddress.ip_address(host)
-            unsafe = (
-                ip.is_private or ip.is_loopback or ip.is_link_local
-                or ip.is_reserved or ip.is_multicast or ip.is_unspecified
-            )
-        except ValueError:
-            unsafe = False
-    if unsafe:
+    host = urlparse(url).hostname or ""
+    if _is_unsafe_host(host):
         raise HTTPException(400, _err_payload(
             "INVALID_URL_TARGET",
             f"拒绝访问内网地址: {host}",
             "该端点仅用于转发 MinerU 签发的公网链接",
+        ))
+
+
+_ALLOW_PRIVATE_LLM_BASE_URL = os.getenv(
+    "PDF2SKILL_ALLOW_PRIVATE_BASE_URL", ""
+).strip().lower() not in ("", "0", "false", "no")
+
+
+def _check_llm_base_url_allowed(provider: str, base_url: str) -> None:
+    """Providers live behind the proxy's real API keys, so by default their
+    base_url must not point back into loopback/LAN (SSRF read amplifier).
+    Local LLM servers (Ollama 等) opt in via PDF2SKILL_ALLOW_PRIVATE_BASE_URL."""
+    if _ALLOW_PRIVATE_LLM_BASE_URL:
+        return
+    if _is_unsafe_host(urlparse(base_url).hostname or ""):
+        raise HTTPException(422, _err_payload(
+            "PRIVATE_BASE_URL",
+            f"Provider '{provider}' 的 base_url 指向内网/本机地址",
+            "代理持有真实 API Key，默认禁止内网 base_url；"
+            "如确需本地 LLM 服务，请在服务端环境设置 PDF2SKILL_ALLOW_PRIVATE_BASE_URL=1",
         ))
 
 
@@ -169,6 +230,7 @@ def _resolve_provider(provider: str):
             f"Provider '{provider}' 缺少 base_url",
             f"请通过 /api/providers 为 '{provider}' 配置 base_url",
         ))
+    _check_llm_base_url_allowed(provider, base_url)
     provider_key_env = f"{provider.upper().replace('-', '_')}_API_KEY"
     api_key = os.getenv(provider_key_env) or os.getenv(cfg.get("api_key_env", ""))
     if not api_key:
@@ -237,9 +299,15 @@ def llm_chat(body: dict):
     base_url, api_key, _ = _resolve_provider(provider)
 
     settings = _load_settings()
-    llm_cfg = settings.get("llm", {})
-    timeout = int(llm_cfg.get("timeout", 300))
-    max_retries = int(llm_cfg.get("max_retries", 3))
+    llm_cfg = settings.get("llm", {}) or {}
+    try:
+        timeout = max(10, min(int(llm_cfg.get("timeout") or 300), 600))
+    except (TypeError, ValueError):
+        timeout = 300
+    try:
+        max_retries = max(1, min(int(llm_cfg.get("max_retries") or 3), 6))
+    except (TypeError, ValueError):
+        max_retries = 3
 
     payload = {
         "model": model,
@@ -281,9 +349,9 @@ def llm_chat(body: dict):
             else:
                 raise HTTPException(200, err)
         if attempt < max_retries - 1:
-            import time
             time.sleep(2 ** attempt)
-    raise HTTPException(200, last_error)
+    raise HTTPException(200, last_error or _err_payload(
+        "LLM_UNKNOWN", "LLM 请求失败且无详细错误", "请检查服务端日志后重试"))
 
 
 # ── models list (ported from server.py) ─────────────────────────────
@@ -360,6 +428,16 @@ def get_keys():
     }
 
 
+def _registered_api_key_envs() -> set:
+    """api_key_env names declared in settings.yaml providers."""
+    try:
+        data = _load_settings()
+    except HTTPException:
+        return set()
+    providers = data.get("llm", {}).get("providers", {}) or {}
+    return {cfg.get("api_key_env", "") for cfg in providers.values() if cfg.get("api_key_env")}
+
+
 @app.post("/api/keys")
 def set_key(body: dict):
     env_var = body.get("env_var", "")
@@ -370,6 +448,13 @@ def set_key(body: dict):
         raise HTTPException(422, detail=_err_payload(
             "INVALID_ENV_VAR", f"环境变量名 '{env_var}' 不合法",
             "环境变量名只能包含字母、数字、下划线，且以字母或下划线开头"))
+    # A free-form env write would let a compromised page repoint ALL_PROXY /
+    # HTTP_PROXY and route every outbound request (with real Bearer keys)
+    # through an attacker proxy. Only key-shaped variables may be written.
+    if not (env_var.endswith("_API_KEY") or env_var in _registered_api_key_envs()):
+        raise HTTPException(422, detail=_err_payload(
+            "FORBIDDEN_ENV_VAR", f"拒绝写入环境变量 '{env_var}'",
+            "只允许写入 *_API_KEY 形式的密钥变量，或 settings.yaml 中注册的 api_key_env"))
     os.environ[env_var] = value
     return {"ok": True}
 
@@ -421,6 +506,7 @@ def update_providers(body: dict):
                         raise HTTPException(422, detail=_err_payload(
                             "INVALID_BASE_URL", f"Provider '{name}' 的 base_url 必须以 http:// 或 https:// 开头",
                             "示例: https://api.example.com/v1"))
+                    _check_llm_base_url_allowed(name, v)
                 elif k == "api_key_env":
                     if not isinstance(v, str):
                         raise HTTPException(422, detail=_err_payload(
@@ -490,11 +576,17 @@ async def mineru_file_urls(request: Request):
 @app.put("/api/mineru/upload")
 async def mineru_upload(request: Request, url: str):
     """Stream the PDF bytes from the browser to MinerU's signed upload URL."""
-    body = await request.body()
     if not url.startswith(("http://", "https://")):
         raise HTTPException(400, _err_payload(
             "INVALID_URL", "上传地址不合法", "请传入 MinerU 返回的 http(s) 上传地址"))
     _reject_unsafe_outbound_url(url)
+    content_length = request.headers.get("content-length", "")
+    if content_length.isdigit() and int(content_length) > _MAX_UPLOAD_BYTES:
+        raise HTTPException(413, _err_payload(
+            "PAYLOAD_TOO_LARGE",
+            f"上传内容超过 {_MAX_UPLOAD_BYTES // (1024 * 1024)}MB 上限",
+            "请压缩或拆分 PDF 后重试"))
+    body = await request.body()
     try:
         resp = requests.put(url, data=body, timeout=(5, 300))
     except requests.RequestException as e:
@@ -529,14 +621,16 @@ def mineru_download(url: str):
             "INVALID_URL", "下载地址不合法", "请传入 MinerU 返回的 http(s) 下载地址"))
     _reject_unsafe_outbound_url(url)
     try:
-        resp = requests.get(url, timeout=(5, 300))
+        resp = requests.get(url, timeout=(5, 300), stream=True)
     except requests.RequestException as e:
         raise HTTPException(200, _err_payload("MINERU_DOWNLOAD", f"下载 MinerU 结果失败: {e}",
                                               "请检查网络连接后重试"))
     if resp.status_code != 200:
+        resp.close()
         raise HTTPException(200, _err_payload("MINERU_DOWNLOAD",
                                               f"下载 MinerU 结果失败 (HTTP {resp.status_code})", "请重试"))
-    return Response(content=resp.content, media_type="application/zip")
+    return StreamingResponse(resp.iter_content(chunk_size=256 * 1024),
+                             media_type="application/zip")
 
 
 # ── MinerU proxy (self-hosted Gradio) ───────────────────────────────
@@ -550,6 +644,26 @@ _GRADIO_LANG_MAP = {
     "japan": "japan (Chinese, English, Chinese Traditional, Japanese)",
     "chinese_cht": "chinese_cht (Chinese, English, Chinese Traditional, Japanese)",
 }
+
+
+# The Gradio endpoint fully controls the paths in `result`; reads must stay
+# inside these roots (where gradio_client caches downloads) so a malicious or
+# compromised endpoint can't make the proxy read arbitrary local files.
+_ALLOWED_ZIP_ROOTS = (
+    Path(tempfile.gettempdir()).resolve(),
+    (Path.home() / ".cache").resolve(),
+    (Path.home() / ".gradio").resolve(),
+)
+
+
+def _zip_path_confined(zip_path: Path) -> bool:
+    try:
+        resolved = zip_path.resolve()
+    except OSError:
+        return False
+    return any(
+        resolved.is_relative_to(root) for root in _ALLOWED_ZIP_ROOTS
+    )
 
 
 @app.post("/api/mineru/local")
@@ -616,8 +730,18 @@ async def mineru_local(
             raise HTTPException(200, _err_payload("MINERU_LOCAL_RESULT",
                                                   f"本地 MinerU 未返回有效的 ZIP: {result}",
                                                   "请检查自部署 MinerU 服务版本是否匹配"))
-        with open(zip_path, "rb") as f:
+        zp = Path(str(zip_path))
+        if not _zip_path_confined(zp):
+            raise HTTPException(200, _err_payload(
+                "MINERU_LOCAL_RESULT",
+                f"本地 MinerU 返回的文件路径不在允许目录内: {zip_path}",
+                "结果文件应位于系统临时目录或 Gradio 缓存目录，已拒绝读取其他路径"))
+        with open(zp, "rb") as f:
             zip_bytes = f.read()
+        if zip_bytes[:4] != b"PK\x03\x04":
+            raise HTTPException(200, _err_payload("MINERU_LOCAL_RESULT",
+                                                  "本地 MinerU 返回的内容不是有效的 ZIP 文件",
+                                                  "请检查自部署 MinerU 服务版本是否匹配"))
         return Response(content=zip_bytes, media_type="application/zip")
     finally:
         shutil.rmtree(tmp_dir, ignore_errors=True)
