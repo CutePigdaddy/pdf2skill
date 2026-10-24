@@ -7,6 +7,7 @@ from dataclasses import dataclass, field
 from tqdm import tqdm
 from utils.logger import logger, LLMParsingError
 from utils.llm_client import LLMClient
+from utils.retry_client import NetworkError, RateLimitError, LLMConnectionError
 from config.config import config
 from Levenshtein import distance as levenshtein_distance
 
@@ -61,7 +62,6 @@ class TreeMerger:
         self.chunk_max_iterations = config.get("pdf.chunk_max_iterations", 5)
         self.chunk_anchor_length = config.get("pdf.chunk_anchor_length", 30)
         self.output_language = config.get("system.output_language", "English")
-        self.chars_per_token = 2
         self.llm = LLMClient(stage="peeling")
         self.chunk_counter = 0
         self.peel_errors = 0  # Track LLM failures during peeling
@@ -72,15 +72,33 @@ class TreeMerger:
         return f"chunk_{self.chunk_counter:04d}"
 
     def estimate_tokens(self, text: str) -> int:
-        """Rough estimation of token count based on character length.
+        """Rough token estimate weighted by character composition.
+
+        CJK characters encode ≈1 token each in modern tokenizers while
+        Latin text averages ≈4 chars/token, so the previous flat
+        ``chars / 2`` divisor underestimated Chinese text by 2-4x and let
+        oversized chunks pass the token limit.
 
         Args:
             text: Input text.
 
         Returns:
-            Estimated token count (chars / 2).
+            Estimated token count (CJK ≈1 token/char, other ≈0.25/char).
         """
-        return len(text) // self.chars_per_token
+        cjk = sum(1 for ch in text if self._is_cjk(ch))
+        other = len(text) - cjk
+        return cjk + (other + 3) // 4
+
+    @staticmethod
+    def _is_cjk(ch: str) -> bool:
+        """True for CJK ideographs, kana, hangul, and fullwidth forms."""
+        return (
+            '\u4e00' <= ch <= '\u9fff'      # CJK Unified Ideographs
+            or '\u3400' <= ch <= '\u4dbf'   # CJK Extension A
+            or '\u3040' <= ch <= '\u30ff'   # Hiragana / Katakana
+            or '\xac00' <= ch <= '\ud7af'   # Hangul syllables
+            or '\uff00' <= ch <= '\uffef'   # Fullwidth forms
+        )
 
     def find_anchor_position(self, content: str, anchor: str) -> int:
         """Locate a sub-header anchor in the text using exact then fuzzy matching.
@@ -248,7 +266,19 @@ Return ONLY the JSON object. No prose."""
 
             anchors = result.get("anchors", [])
 
-        except (json.JSONDecodeError, LLMParsingError, requests.RequestException) as e:
+        except (
+            json.JSONDecodeError,
+            LLMParsingError,
+            LLMConnectionError,
+            NetworkError,
+            RateLimitError,
+            ValueError,
+            requests.RequestException,
+        ) as e:
+            # llm_client wraps HTTP/timeout failures as ValueError and
+            # RetrySession wraps connection/429 failures as NetworkError /
+            # RateLimitError — a single transient 5xx must degrade this chunk
+            # to peel_errors, not crash the whole Stage 3.
             logger.warning(f"    Could not parse LLM response: {e}")
             self.peel_errors += 1
             return [chunk]
@@ -270,10 +300,14 @@ Return ONLY the JSON object. No prose."""
                 logger.warning(f"    Could not find anchor: '{anchor_text[:30]}...'")
 
         split_positions.append(len(chunk.content))
-        # Ensure we have a title for the last segment if the LLM didn't provide enough
+        # Anchor i's title describes the segment STARTING at anchor i, so the
+        # first segment (before any anchor) has no LLM title: prepend rather
+        # than append, otherwise every title shifts one segment up and the
+        # last segment falls to the "(Part N)" fallback.
+        suggested_titles = [None] + suggested_titles
         while len(suggested_titles) < len(split_positions) - 1:
             suggested_titles.append(None)
-            
+
         # Sort positions and corresponding titles together
         combined = sorted(zip(split_positions[:-1], suggested_titles), key=lambda x: x[0])
         split_positions = [x[0] for x in combined] + [split_positions[-1]]

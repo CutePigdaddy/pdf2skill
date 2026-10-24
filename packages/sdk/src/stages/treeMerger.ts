@@ -112,8 +112,28 @@ export class TreeMerger {
     return `chunk_${String(this.chunkCounter).padStart(4, '0')}`;
   }
 
+  /**
+   * Rough token estimate weighted by character composition: CJK chars
+   * encode ≈1 token each in modern tokenizers, Latin text ≈4 chars/token.
+   * The previous flat chars/2 divisor underestimated Chinese text by 2-4x.
+   * (Parity: core/tree_merger.py::estimate_tokens)
+   */
   estimateTokens(text: string): number {
-    return Math.trunc(charCount(text) / 2);
+    let cjk = 0;
+    for (const ch of text) {
+      const c = ch.codePointAt(0) ?? 0;
+      if (
+        (c >= 0x4e00 && c <= 0x9fff) ||  // CJK Unified Ideographs
+        (c >= 0x3400 && c <= 0x4dbf) ||  // CJK Extension A
+        (c >= 0x3040 && c <= 0x30ff) ||  // Hiragana / Katakana
+        (c >= 0xac00 && c <= 0xd7af) ||  // Hangul syllables
+        (c >= 0xff00 && c <= 0xffef)     // Fullwidth forms
+      ) {
+        cjk++;
+      }
+    }
+    const other = charCount(text) - cjk;
+    return cjk + Math.ceil(other / 4);
   }
 
   /**
@@ -252,6 +272,12 @@ export class TreeMerger {
     }
 
     splitPositions.push(contentCps.length);
+    // Anchor i's title describes the segment STARTING at anchor i, so the
+    // first segment (before any anchor) has no LLM title: prepend rather
+    // than append, otherwise every title shifts one segment up and the
+    // last segment falls to the "(Part N)" fallback. (Parity:
+    // core/tree_merger.py — same fix applied on both sides.)
+    suggestedTitles.unshift(null);
     while (suggestedTitles.length < splitPositions.length - 1) {
       suggestedTitles.push(null);
     }

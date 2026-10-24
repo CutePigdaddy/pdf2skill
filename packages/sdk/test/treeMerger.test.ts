@@ -133,21 +133,25 @@ describe('recursivePeel', () => {
         is_atomic: false,
       }),
     );
-    const merger = new TreeMerger(llm, { chunkMinThreshold: 1000, chunkMaxTokens: 2000 });
+    const merger = new TreeMerger(llm, { chunkMinThreshold: 1000, chunkMaxTokens: 1000 });
     const node = new ChunkNode('chunk_0001', 'Chapter', [], content, 1, 100, 1);
     await merger.recursivePeel(node);
-    // Three segments: [0,3000) 'Part B', [3000,6000) 'Part C', [6000,6100)
-    // 'Chapter (Part 3)'. The last (100 chars < 1000) has no next sibling
+    // Anchor titles describe the segment starting at the anchor, so:
+    // [0,3000) has no LLM title -> 'Chapter (Part 1)'; [3000,6000) 'Part B';
+    // [6000,6100) 'Part C'. The last (100 chars < 1000) has no next sibling
     // and merges into the previous one.
     expect(node.children.length).toBe(2);
+    expect(node.children[0].title).toBe('Chapter (Part 1)');
     expect(node.children[1].content.endsWith(part3)).toBe(true);
-    expect(node.children[1].title).toBe('Part C & Chapter (Part 3)');
+    expect(node.children[1].title).toBe('Part B & Part C');
   });
 
   it('counts peel errors on unparseable responses and keeps the chunk', async () => {
     const llm = mockLlm(() => 'This is not JSON at all {{{');
     const merger = new TreeMerger(llm);
-    const node = new ChunkNode('chunk_0001', 'Big', [], 'x'.repeat(30000), 1, 100, 1);
+    // 60k Latin chars ≈ 15k tokens under the CJK-weighted estimator, so the
+    // chunk exceeds the default 10k-token limit and the peel LLM is called.
+    const node = new ChunkNode('chunk_0001', 'Big', [], 'x'.repeat(60000), 1, 100, 1);
     const result = await merger.recursivePeel(node);
     expect(result).toEqual([node]);
     expect(node.children.length).toBe(0);
@@ -158,28 +162,28 @@ describe('recursivePeel', () => {
     // swallowed: timeout
     const timeoutLlm = mockLlm(() => { throw Object.assign(new Error('timeout'), { code: 'LLM_TIMEOUT' }); });
     const m1 = new TreeMerger(timeoutLlm);
-    const n1 = new ChunkNode('c', 't', [], 'x'.repeat(30000), 1, 2, 1);
+    const n1 = new ChunkNode('c', 't', [], 'x'.repeat(60000), 1, 2, 1);
     expect(await m1.recursivePeel(n1)).toEqual([n1]);
     expect(m1.peelErrors).toBe(1);
 
     // swallowed: LLM_PARSE (JSON decode / response format errors)
     const parseLlm = mockLlm(() => { throw Object.assign(new Error('bad format'), { code: 'LLM_PARSE' }); });
     const m2 = new TreeMerger(parseLlm);
-    const n2 = new ChunkNode('c', 't', [], 'x'.repeat(30000), 1, 2, 1);
+    const n2 = new ChunkNode('c', 't', [], 'x'.repeat(60000), 1, 2, 1);
     expect(await m2.recursivePeel(n2)).toEqual([n2]);
     expect(m2.peelErrors).toBe(1);
 
     // propagated: auth error (Python ValueError)
     const authLlm = mockLlm(() => { throw Object.assign(new Error('401'), { code: 'LLM_AUTH' }); });
     const m3 = new TreeMerger(authLlm);
-    const n3 = new ChunkNode('c', 't', [], 'x'.repeat(30000), 1, 2, 1);
+    const n3 = new ChunkNode('c', 't', [], 'x'.repeat(60000), 1, 2, 1);
     await expect(m3.recursivePeel(n3)).rejects.toMatchObject({ code: 'LLM_AUTH' });
   });
 
   it('honours the AI atomic decision', async () => {
     const llm = mockLlm(() => JSON.stringify({ anchors: [], is_atomic: true }));
     const merger = new TreeMerger(llm);
-    const node = new ChunkNode('chunk_0001', 'Exercises', [], 'q'.repeat(30000), 1, 100, 1);
+    const node = new ChunkNode('chunk_0001', 'Exercises', [], 'q'.repeat(60000), 1, 100, 1);
     const result = await merger.recursivePeel(node);
     expect(result).toEqual([node]);
     expect(node.isAtomic).toBe(true);
@@ -213,14 +217,14 @@ describe('recursivePeel', () => {
       });
     });
     const merger = new TreeMerger(llm, { chunkMaxIterations: 2, chunkMinThreshold: 1 });
-    const node = new ChunkNode('chunk_0001', 'Chapter', [], 'x'.repeat(30000) + 'y'.repeat(30), 1, 100, 1);
+    const node = new ChunkNode('chunk_0001', 'Chapter', [], 'x'.repeat(60000) + 'y'.repeat(30), 1, 100, 1);
     const leaves = await merger.recursivePeel(node);
-    // First peel splits into two; the 30k-char half would need iteration 3,
+    // First peel splits into two; the 60k-char half would need iteration 3,
     // which exceeds maxIterations=2, so it is kept as-is with no extra LLM call.
     expect(calls).toBe(1);
     expect(node.children.length).toBe(2);
     expect(leaves).toHaveLength(2);
-    const big = leaves.find((l) => l.content.length === 30000)!;
+    const big = leaves.find((l) => l.content.length === 60000)!;
     expect(big.iteration).toBe(2);
     expect(big.children.length).toBe(0);
   });
@@ -305,7 +309,7 @@ parent_path: Root
 start_line: 1
 end_line: 2
 iteration: 1
-tokens: ~5
+tokens: ~3
 ---
 
 # A

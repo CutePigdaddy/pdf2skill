@@ -27,10 +27,22 @@ llm:
       chunking_model: Kimi-K2.5
       peeling_model: MiniMax-M2.5
       skill_engine_model: MiniMax-M2.5
+    qoder:
+      base_url: https://sg.pigdaddy.xyz/v1
+      api_key_env: QODER_API_KEY
+      chunking_model: Qwen3.8-Max
+      peeling_model: DeepSeek-Flash
+      skill_engine_model: DeepSeek-Flash
+    deepseek:
+      base_url: https://api.deepseek.com/v1
+      api_key_env: DEEPSEEK_API_KEY
+      chunking_model: deepseek-flash
+      peeling_model: deepseek-flash
+      skill_engine_model: deepseek-flash
   routers:
-    chunking_provider: nova
-    peeling_provider: nova
-    skill_engine_provider: nova
+    chunking_provider: qoder
+    peeling_provider: deepseek
+    skill_engine_provider: deepseek
 mineru:
   api_mode: remote
   language: ch

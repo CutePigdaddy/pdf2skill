@@ -1,4 +1,5 @@
 import argparse
+import shutil
 import sys
 from pathlib import Path
 
@@ -13,6 +14,45 @@ from core.llm_chunker import LLMChunker
 from core.tree_merger import TreeMerger, ChunkNode
 from core.skill_engine import SkillEngine
 from core.onboarding import OnboardingWizard
+
+
+def _clear_skill_checkpoint(out_dir: Path, reason: str):
+    """Drop the Stage 4 sub-checkpoint (generated_skills/.checkpoint.json).
+
+    Stage 4 keeps its own checkpoint whose summaries are keyed by
+    deterministic chunk ids (chunk_0001, ...). Re-running Stage 2 or 3
+    rebuilds the tree with different boundaries under the same ids, so stale
+    summaries would silently describe the wrong content in the new run.
+    """
+    skill_ckpt = out_dir / "generated_skills" / ".checkpoint.json"
+    if skill_ckpt.exists():
+        skill_ckpt.unlink()
+        logger.info(f"{reason}: removed stale generated_skills checkpoint")
+
+
+def _clear_stage1_artifacts(out_dir: Path, reason: str):
+    """Remove Stage 1 outputs so a re-run cannot reuse or mix old results.
+
+    Stage 1 skips whenever full.md exists; --restart / --from-stage
+    pdf_conversion must also drop the split PDFs and raw conversion zips,
+    otherwise a re-run extracts into a directory holding stale files.
+    """
+    removed = []
+    stale_md = out_dir / "full.md"
+    if stale_md.exists():
+        stale_md.unlink()
+        removed.append("full.md")
+    splits = out_dir / "splits"
+    if splits.is_dir():
+        shutil.rmtree(splits, ignore_errors=True)
+        removed.append("splits/")
+    stale_zips = list(out_dir.glob("*_mineru_output.zip")) + [out_dir / "remote_mineru_output.zip"]
+    for zip_path in stale_zips:
+        if zip_path.exists():
+            zip_path.unlink()
+            removed.append(zip_path.name)
+    if removed:
+        logger.info(f"{reason}: removed stale Stage 1 artifacts: {', '.join(sorted(set(removed)))}")
 
 def run_pipeline(pdf_path: str, output_dir: str, from_stage: str = None, restart: bool = False):
     """Execute the full 4-stage pdf2skill pipeline.
@@ -37,14 +77,17 @@ def run_pipeline(pdf_path: str, output_dir: str, from_stage: str = None, restart
 
     if restart:
         checkpoint.clear_all()
-        # Remove the primary output file so Stage 1 actually re-runs
-        stale_md = out_dir / "full.md"
-        if stale_md.exists():
-            stale_md.unlink()
-            logger.info("--restart: removed stale full.md")
+        # Remove Stage 1 outputs so Stage 1 actually re-runs, and the Stage 4
+        # sub-checkpoint so old summaries can't leak into the rebuilt tree.
+        _clear_stage1_artifacts(out_dir, "--restart")
+        _clear_skill_checkpoint(out_dir, "--restart")
         logger.info("--restart: all checkpoint data cleared")
     elif from_stage:
         checkpoint.reset_from_stage(from_stage)
+        # The tree is rebuilt below, so Stage 4's id-keyed summaries are stale.
+        _clear_skill_checkpoint(out_dir, f"--from-stage {from_stage}")
+        if from_stage == "pdf_conversion":
+            _clear_stage1_artifacts(out_dir, f"--from-stage {from_stage}")
         logger.info(f"--from-stage {from_stage}: checkpoint reset from '{from_stage}' onwards")
 
     # 1. PDF -> Markdown

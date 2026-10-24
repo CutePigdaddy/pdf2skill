@@ -368,16 +368,50 @@ class OnboardingWizard:
                     env[key.strip()] = val.strip()
         return env
 
+    def _configured_llm_key_envs(self) -> list:
+        """api_key_env names of the providers referenced by ``llm.routers``.
+
+        Read straight from settings.yaml (not the Config singleton) so the
+        check reflects what the pipeline will actually resolve at runtime.
+        """
+        settings_path = self.project_root / "config" / "settings.yaml"
+        try:
+            import yaml
+            with open(settings_path, "r", encoding="utf-8") as f:
+                data = yaml.safe_load(f) or {}
+        except (OSError, ValueError):
+            return []
+        llm = data.get("llm", {}) or {}
+        providers = llm.get("providers", {}) or {}
+        routers = llm.get("routers", {}) or {}
+        envs = []
+        for stage_provider in routers.values():
+            cfg = providers.get(stage_provider) or {}
+            if cfg.get("api_key_env"):
+                envs.append(cfg["api_key_env"])
+        return envs
+
     def _has_essentials(self, env: dict) -> bool:
-        """Check whether the env dict has enough to run the pipeline."""
+        """Check whether the env dict has enough to run the pipeline.
+
+        LLM keys are validated against the ``api_key_env`` of the providers
+        the routers actually reference — not a ``*_API_KEY`` suffix
+        heuristic, which misses providers registered under other names and
+        made the wizard re-run on every start.
+        """
         has_mode = "MINERU_API_MODE" in env
         mode = env.get("MINERU_API_MODE", "local")
         has_mkey = True
         if mode == "remote":
             has_mkey = bool(env.get("MINERU_API_KEY"))
         has_provider = bool(env.get("CHUNKING_PROVIDER"))
-        has_llm_key = any(
-            v for k, v in env.items()
-            if k.endswith("_API_KEY") and k != "MINERU_API_KEY"
-        )
+        required_envs = self._configured_llm_key_envs()
+        if required_envs:
+            has_llm_key = all(bool(env.get(k)) for k in required_envs)
+        else:
+            # settings.yaml unavailable/empty — fall back to the suffix heuristic
+            has_llm_key = any(
+                v for k, v in env.items()
+                if k.endswith("_API_KEY") and k != "MINERU_API_KEY"
+            )
         return has_mode and has_mkey and has_provider and has_llm_key

@@ -368,7 +368,13 @@ class RemoteMinerUProcessor:
             if not md_files:
                 raise MinerUConversionError("MinerU succeeded but no Markdown file found.")
 
-            md_file = md_files[-1]
+            # rglob order is filesystem-dependent and stale files from a
+            # previous failed run may coexist with fresh ones: prefer the
+            # canonical full.md, then fall back to the sorted-last match.
+            md_file = next(
+                (p for p in sorted(md_files) if p.name == "full.md"),
+                sorted(md_files)[-1],
+            )
             img_dir = md_file.parent / "images"
             if img_dir.exists():
                 target_img_dir = output_dir.parent / "images"
@@ -396,9 +402,12 @@ class RemoteMinerUProcessor:
         # Always use signed upload for local files
         url_info = self._request_upload_url(pdf_path.name)
 
-        with open(pdf_path, "rb") as f:
-            resp = RetrySession.put(url_info["upload_url"], data=f, timeout=300)
-            resp.raise_for_status()
+        # Read fully into memory: RetrySession.put retries on connection
+        # failures, and a streaming file handle would resume from EOF and
+        # silently upload a truncated body on the second attempt.
+        pdf_bytes = pdf_path.read_bytes()
+        resp = RetrySession.put(url_info["upload_url"], data=pdf_bytes, timeout=300)
+        resp.raise_for_status()
 
         result = self._wait_for_completion(batch_id=url_info["batch_id"])
         zip_url = result["full_zip_url"]
@@ -590,7 +599,11 @@ class LocalMinerUProcessor:
             if not md_files:
                 raise MinerUConversionError("Local API succeeded but no Markdown file found in the ZIP.")
 
-            md_file = md_files[-1]
+            # Prefer the canonical full.md; rglob order is filesystem-dependent.
+            md_file = next(
+                (p for p in sorted(md_files) if p.name == "full.md"),
+                sorted(md_files)[-1],
+            )
             img_dir = md_file.parent / "images"
             if img_dir.exists():
                 target_img_dir = output_file.parent / "images"

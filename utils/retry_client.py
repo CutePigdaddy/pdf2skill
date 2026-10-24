@@ -12,6 +12,11 @@ class RateLimitError(Exception):
     """Raised when the API returns HTTP 429."""
     pass
 
+class ServerError(Exception):
+    """Raised on transient upstream HTTP 5xx (502/503/504) so the retry
+    decorator can back off and try again."""
+    pass
+
 class LLMConnectionError(Exception):
     """Raised when the LLM API endpoint cannot be reached.
 
@@ -58,21 +63,37 @@ def _diagnose_connection_error(error: Exception, url: str) -> str:
 def custom_retry():
     """Return a tenacity retry decorator with exponential backoff.
 
-    Retries on ``requests.ConnectionError``, ``NetworkError``, and
-    ``RateLimitError`` up to ``llm.max_retries`` attempts.
+    Retries on ``requests.ConnectionError``, ``NetworkError``,
+    ``RateLimitError``, and ``ServerError`` (transient 502/503/504) up to
+    ``llm.max_retries`` attempts.
 
-    Note: Only ``ConnectionError`` (not all ``RequestException``) triggers
-    retries — HTTP errors (4xx/5xx) are raised immediately since retrying
-    won't fix a bad request or server config issue.
+    Note: Other HTTP errors (4xx, non-transient 5xx) are raised immediately
+    since retrying won't fix a bad request or server config issue.
     """
     max_attempts = config.get("llm.max_retries", 3)
     return retry(
         stop=stop_after_attempt(max_attempts),
         wait=wait_exponential(multiplier=1, min=4, max=60),
-        retry=(retry_if_exception_type((requests.ConnectionError, NetworkError, RateLimitError))),
+        retry=(
+            retry_if_exception_type(
+                (requests.ConnectionError, NetworkError, RateLimitError, ServerError)
+            )
+        ),
         before_sleep=before_sleep_log(logger, logging.WARNING),
         reraise=True,
     )
+
+
+_TRANSIENT_STATUS = (502, 503, 504)
+
+
+def _raise_for_status(response):
+    """429 → RateLimitError, transient 5xx → ServerError, else raise_for_status."""
+    if response.status_code == 429:
+        raise RateLimitError(f"Rate limit exceeded: {response.text}")
+    if response.status_code in _TRANSIENT_STATUS:
+        raise ServerError(f"HTTP {response.status_code}: {response.text[:200]}")
+    response.raise_for_status()
 
 class RetrySession:
     """Static wrapper around ``requests`` with automatic retries and rate-limit handling."""
@@ -98,9 +119,7 @@ class RetrySession:
             response = requests.post(url, timeout=timeout, **kwargs)
         except requests.ConnectionError as e:
             raise NetworkError(_diagnose_connection_error(e, url)) from e
-        if response.status_code == 429:
-            raise RateLimitError(f"Rate limit exceeded: {response.text}")
-        response.raise_for_status()
+        _raise_for_status(response)
         return response
 
     @staticmethod
@@ -123,9 +142,7 @@ class RetrySession:
             response = requests.put(url, timeout=timeout, **kwargs)
         except requests.ConnectionError as e:
             raise NetworkError(_diagnose_connection_error(e, url)) from e
-        if response.status_code == 429:
-            raise RateLimitError(f"Rate limit exceeded: {response.text}")
-        response.raise_for_status()
+        _raise_for_status(response)
         return response
 
     @staticmethod
@@ -150,7 +167,5 @@ class RetrySession:
             response = requests.get(url, timeout=timeout, **kwargs)
         except requests.ConnectionError as e:
             raise NetworkError(_diagnose_connection_error(e, url)) from e
-        if response.status_code == 429:
-            raise RateLimitError(f"Rate limit exceeded: {response.text}")
-        response.raise_for_status()
+        _raise_for_status(response)
         return response

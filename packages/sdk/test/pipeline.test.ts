@@ -186,11 +186,14 @@ describe('runPipeline (markdown input)', () => {
       restart: true,
       createLlm: () => llm,
     });
-    // Python --restart clears only the main checkpoint; the Stage-4
-    // fine-grained checkpoint in generated_skills/ survives, so exactly one
-    // LLM call (the chunk strategy) is re-issued.
-    expect(llm.calls.length).toBe(1);
+    // --restart also clears the Stage-4 fine-grained checkpoint in
+    // generated_skills/: chunk ids are deterministic (chunk_0001…) but chunk
+    // content is not, so surviving summaries would silently re-pair old tags
+    // with new content. Strategy, overview, per-chunk tagging and name calls
+    // are all re-issued (1 + 1 + 3 + 1).
+    expect(llm.calls.length).toBe(6);
     expect(llm.calls[0]).toContain('document structure analyzer');
+    expect(llm.calls[1]).toContain('curriculum designer');
   });
 
   it('fromStage resets that stage and all later stages', async () => {
