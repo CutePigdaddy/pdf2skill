@@ -18,6 +18,7 @@ env/
 # ── Environment & secrets ─────────────────────────────────────────
 .env
 .env.*
+!.env.example
 
 # ── Runtime outputs ───────────────────────────────────────────────
 logs/

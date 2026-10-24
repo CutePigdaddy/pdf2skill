@@ -79,7 +79,11 @@ def _run_start_pipeline(tmp_path, monkeypatch, body_extra):
     class FakeProc:
         returncode = 0
 
-    monkeypatch.setattr(fe_server.subprocess, "Popen", lambda cmd, **kw: captured.setdefault("cmd", cmd) or FakeProc())
+    def fake_popen(cmd, **kw):
+        captured["cmd"] = cmd
+        return FakeProc()
+
+    monkeypatch.setattr(fe_server.subprocess, "Popen", fake_popen)
     monkeypatch.setattr(fe_server, "LOGS_DIR", tmp_path)
     monkeypatch.setattr(fe_server, "INPUTS_DIR", tmp_path / "inputs")
     monkeypatch.setattr(fe_server, "OUTPUTS_DIR", tmp_path / "outputs")
