@@ -2,6 +2,7 @@ import { Pdf2Skill, validateConfig } from '@pdf2skill/sdk';
 import type { ProviderConfig } from '@pdf2skill/sdk';
 import { fetchModels, getKeys, getProviders, setKey, syncProviders } from '../api/backend';
 import { $, checked, escapeHtml, errInfoOf, setChecked, setVal, showToast, val } from '../ui/dom';
+import { syncSelect } from '../ui/dropdown';
 
 const STAGES: {
   selId: string;
@@ -31,8 +32,8 @@ function showSaveError(e: unknown): void {
   const info = errInfoOf(e);
   const box = $('config-error');
   box.innerHTML =
-    `<div class="error-title">⚠ ${escapeHtml(info.message)}</div>` +
-    (info.advice ? `<div class="error-advice">💡 ${escapeHtml(info.advice)}</div>` : '');
+    `<div class="error-title"><i class="ph ph-warning"></i>${escapeHtml(info.message)}</div>` +
+    (info.advice ? `<div class="error-advice">${escapeHtml(info.advice)}</div>` : '');
   box.classList.add('active');
   box.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
 }
@@ -53,8 +54,8 @@ function renderProviderRows(): void {
       const cfg = providers[name];
       const info = keyStatus[name] || {};
       const badge = info.api_key_set
-        ? `<span class="key-badge key-set">✓ ${escapeHtml(info.api_key_preview || '已设置')}</span>`
-        : `<span class="key-badge key-missing">✗ 未设置 Key</span>`;
+        ? `<span class="key-badge key-set"><i class="ph ph-check"></i>${escapeHtml(info.api_key_preview || '已设置')}</span>`
+        : `<span class="key-badge key-missing"><i class="ph ph-x"></i>未设置 Key</span>`;
       const modelFields = MODEL_KEYS.map(
         (k) =>
           `<div class="pf-field"><label>${escapeHtml(k.replace('_model', ''))} 模型</label>` +
@@ -67,8 +68,8 @@ function renderProviderRows(): void {
         <span class="provider-name">${escapeHtml(name)}</span>
         ${badge}
         <div class="provider-head-actions">
-          <button class="btn btn-ghost btn-sm" data-action="models" data-name="${escapeHtml(name)}">获取模型列表</button>
-          <button class="btn btn-danger btn-sm" data-action="delete" data-name="${escapeHtml(name)}">删除</button>
+          <button class="btn btn-ghost btn-sm" data-action="models" data-name="${escapeHtml(name)}"><i class="ph ph-list-bullets"></i>获取模型列表</button>
+          <button class="btn btn-danger btn-sm" data-action="delete" data-name="${escapeHtml(name)}"><i class="ph ph-trash"></i>删除</button>
         </div>
       </div>
       <div class="provider-fields">
@@ -136,7 +137,7 @@ async function fetchModelsFor(providerName: string): Promise<void> {
       if (errBox) {
         errBox.innerHTML =
           `<div class="model-error-title">${escapeHtml(info.message)}</div>` +
-          (info.advice ? `<div class="model-error-advice">💡 ${escapeHtml(info.advice)}</div>` : '');
+          (info.advice ? `<div class="model-error-advice">${escapeHtml(info.advice)}</div>` : '');
         errBox.style.display = 'block';
       }
       return;
@@ -149,7 +150,7 @@ async function fetchModelsFor(providerName: string): Promise<void> {
     if (errBox) {
       errBox.innerHTML =
         `<div class="model-error-title">${escapeHtml(info.message)}</div>` +
-        (info.advice ? `<div class="model-error-advice">💡 ${escapeHtml(info.advice)}</div>` : '');
+        (info.advice ? `<div class="model-error-advice">${escapeHtml(info.advice)}</div>` : '');
       errBox.style.display = 'block';
     }
   } finally {
@@ -205,7 +206,7 @@ async function saveNewProvider(): Promise<void> {
     routers: { chunking: '', peeling: '', skillEngine: '' },
   });
   if (issues.length > 0) {
-    return showFormError(`${issues[0].message} — ${issues[0].advice}`);
+    return showFormError(`${issues[0].message}：${issues[0].advice}`);
   }
 
   const cfg = sdk().getConfig();
@@ -290,6 +291,8 @@ export async function loadConfigUI(): Promise<void> {
   setVal('mu-language-remote', cfg.mineru.language);
 
   renderProviderRows();
+  // Reflect programmatically-set values on the themed dropdown triggers.
+  document.querySelectorAll<HTMLSelectElement>('select').forEach(syncSelect);
   await loadKeyStatus();
 }
 
@@ -302,10 +305,10 @@ async function loadKeyStatus(): Promise<void> {
     const muKeyBadge = $('mu-key-badge');
     if (data.mineru?.api_key_set) {
       muKeyBadge.className = 'key-badge key-set';
-      muKeyBadge.textContent = '✓ ' + (data.mineru.api_key_preview || '已设置');
+      muKeyBadge.innerHTML = `<i class="ph ph-check"></i>${escapeHtml(data.mineru.api_key_preview || '已设置')}`;
     } else {
       muKeyBadge.className = 'key-badge key-missing';
-      muKeyBadge.textContent = '✗ 未设置';
+      muKeyBadge.innerHTML = '<i class="ph ph-x"></i>未设置';
     }
 
     // API keys section
@@ -321,7 +324,7 @@ async function loadKeyStatus(): Promise<void> {
       row.className = 'key-row';
       row.innerHTML = `
         <strong>${escapeHtml(name)}</strong>
-        <span class="key-badge ${set ? 'key-set' : 'key-missing'}">${set ? '✓ ' + escapeHtml(preview) : '✗ 未设置'}</span>
+        <span class="key-badge ${set ? 'key-set' : 'key-missing'}">${set ? '<i class="ph ph-check"></i>' + escapeHtml(preview) : '<i class="ph ph-x"></i>未设置'}</span>
         <input type="password" placeholder="输入 ${escapeHtml(envVar)}" style="max-width:240px">
         <button class="btn btn-sm btn-primary">设置</button>`;
       const input = row.querySelector('input')!;
@@ -334,7 +337,7 @@ async function loadKeyStatus(): Promise<void> {
   } catch {
     // Backend offline: keys section shows a hint.
     $('apikey-section').innerHTML =
-      '<div class="key-row"><span class="key-badge key-missing">代理后端未连接 — Key 状态不可用</span></div>';
+      '<div class="key-row"><span class="key-badge key-missing"><i class="ph ph-x"></i>代理后端未连接：Key 状态不可用</span></div>';
   }
 }
 

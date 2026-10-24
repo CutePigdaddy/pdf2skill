@@ -1,22 +1,51 @@
 import { Pdf2Skill, VERSION } from '@pdf2skill/sdk';
+import '@phosphor-icons/web/regular';
+// Self-hosted variable fonts (offline-safe; Noto Sans SC ships as
+// unicode-range subsets so the browser only fetches the slices it renders).
+import '@fontsource-variable/space-grotesk';
+import '@fontsource-variable/noto-sans-sc';
+import '@fontsource-variable/jetbrains-mono';
 import { checkHealth } from './api/backend';
 import { loadConfigUI, setupConfigTab } from './tabs/config';
 import { setupRunTab } from './tabs/run';
 import { refreshOutputs, setupOutputsTab } from './tabs/outputs';
+import { enhanceSelects } from './ui/dropdown';
+
+// Swap native selects for the themed dropdown before tab wiring.
+enhanceSelects();
 
 const pdf2skill = new Pdf2Skill();
 
 // ── Tabs ──────────────────────────────────────────────────────────
 
-function switchTab(tabId: string): void {
+function switchTab(tabId: string, focusTab = false): void {
   document.querySelectorAll<HTMLElement>('.tab').forEach((t) => {
-    t.classList.toggle('active', t.dataset.tab === tabId);
+    const active = t.dataset.tab === tabId;
+    t.classList.toggle('active', active);
+    t.setAttribute('aria-selected', String(active));
+    t.tabIndex = active ? 0 : -1;
+    if (active && focusTab) t.focus();
   });
   document.querySelectorAll<HTMLElement>('.panel').forEach((p) => {
     p.classList.toggle('active', p.id === 'panel-' + tabId);
   });
   if (tabId === 'outputs') void refreshOutputs().catch(() => {});
 }
+
+const tabList = document.querySelector<HTMLElement>('.tabs');
+tabList?.addEventListener('keydown', (e) => {
+  const tabs = [...tabList.querySelectorAll<HTMLElement>('.tab')];
+  const current = tabs.findIndex((t) => t.classList.contains('active'));
+  let next = -1;
+  if (e.key === 'ArrowRight' || e.key === 'ArrowDown') next = (current + 1) % tabs.length;
+  else if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') next = (current - 1 + tabs.length) % tabs.length;
+  else if (e.key === 'Home') next = 0;
+  else if (e.key === 'End') next = tabs.length - 1;
+  if (next >= 0) {
+    e.preventDefault();
+    switchTab(tabs[next].dataset.tab!, true);
+  }
+});
 
 document.querySelectorAll<HTMLElement>('.tab').forEach((tab) => {
   tab.addEventListener('click', () => switchTab(tab.dataset.tab!));

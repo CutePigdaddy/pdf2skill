@@ -2,6 +2,7 @@
   "name": "pdf2skill-monorepo",
   "private": true,
   "version": "1.0.0",
+  "packageManager": "npm@10.0.0",
   "workspaces": [
     "packages/*"
   ],

@@ -3,29 +3,27 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>PDF2Skill</title>
-<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Ccircle cx='8' cy='8' r='6' fill='%232563eb'/%3E%3C/svg%3E">
+<title>pdf2skill 工作台</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='M2.5 1.5h7.6L13.5 4.9V14a1.5 1.5 0 0 1-1.5 1.5H4A1.5 1.5 0 0 1 2.5 14z' fill='%232563eb'/%3E%3Cpath d='M10.1 1.5v3.4h3.4z' fill='%23bfdbfe'/%3E%3Crect x='5' y='7' width='6' height='1.4' rx='0.7' fill='white'/%3E%3Crect x='5' y='10' width='4' height='1.4' rx='0.7' fill='white'/%3E%3C/svg%3E">
 <link rel="stylesheet" href="/style.css">
 </head>
 <body>
 
-<!-- ── Top Navigation ────────────────────────────────────────────── -->
+<!-- ── Top nav: brand + tabs + backend health, one line ─────────── -->
 <nav class="top-nav">
   <div class="wordmark">
     <span class="mark"></span>
-    <span class="brand">PDF2Skill</span>
-    <span class="brand-sub">纯前端流水线 · SDK 演示</span>
+    <span class="brand">pdf<span class="brand-accent">2</span>skill</span>
+    <span class="brand-sub">纯前端流水线</span>
+  </div>
+  <div class="tabs" role="tablist" aria-label="主导航">
+    <div class="tab active" data-tab="tutorial" role="tab" aria-selected="true" tabindex="0">教程</div>
+    <div class="tab" data-tab="config" role="tab" aria-selected="false" tabindex="-1">配置</div>
+    <div class="tab" data-tab="run" role="tab" aria-selected="false" tabindex="-1">运行</div>
+    <div class="tab" data-tab="outputs" role="tab" aria-selected="false" tabindex="-1">输出</div>
   </div>
   <span class="health-badge bad" id="health-badge"><span class="dot"></span><span id="health-text">后端未连接</span></span>
 </nav>
-
-<!-- ── Tabs ──────────────────────────────────────────────────────── -->
-<div class="tabs">
-  <div class="tab active" data-tab="tutorial">教程</div>
-  <div class="tab" data-tab="config">配置</div>
-  <div class="tab" data-tab="run">运行</div>
-  <div class="tab" data-tab="outputs">输出</div>
-</div>
 
 <!-- ═══ Tutorial Panel ═══ -->
 <div class="panel active" id="panel-tutorial">
@@ -34,11 +32,9 @@
 
   <div class="startup-card">
     <div class="startup-title">启动方式</div>
-    <div class="startup-line">
-      ① 启动代理后端（持有 API Key）：<code>python frontend/proxy_server.py</code>（端口 8502）<br>
-      ② 启动本界面：<code>npm run dev:app</code>，浏览器访问 <code>http://localhost:5173</code><br>
-      流水线（分块 / 树剥离 / 技能生成 / 断点续传 / 文件存储）全部在浏览器内完成，输出保存在 OPFS。
-    </div>
+    <div class="startup-line"><span class="k">1</span><span>启动代理后端（持有 API Key）：<code>python frontend/proxy_server.py</code>（端口 8502）</span></div>
+    <div class="startup-line"><span class="k">2</span><span>启动本界面：<code>npm run dev:app</code>，浏览器访问 <code>http://localhost:5173</code></span></div>
+    <div class="startup-line"><span class="k">i</span><span>分块 / 树剥离 / 技能生成 / 断点续传 / 文件存储全部在浏览器内完成，输出保存在 OPFS。</span></div>
   </div>
 
   <div class="tutorial-step">
@@ -47,18 +43,19 @@
       <div class="step-title">项目介绍</div>
       <div class="step-text">将 PDF 教材/文档自动转化为<strong>结构化知识索引</strong>与<strong>可复用的技能库</strong>（SKILL.md + 分块引用文件）。四阶段流水线：</div>
       <div class="step-flow">
-        <span class="flow-item">① MinerU（PDF → Markdown）</span>
-        <span class="flow-arrow">→</span>
-        <span class="flow-item">② Chunking（语义分块）</span>
-        <span class="flow-arrow">→</span>
-        <span class="flow-item">③ Peeling（TOC 剥离）</span>
-        <span class="flow-arrow">→</span>
-        <span class="flow-item">④ Skill Engine（生成技能库）</span>
+        <span class="flow-item"><span class="k">1</span>MinerU（PDF → Markdown）</span>
+        <span class="flow-arrow"><i class="ph ph-arrow-right"></i></span>
+        <span class="flow-item"><span class="k">2</span>Chunking（语义分块）</span>
+        <span class="flow-arrow"><i class="ph ph-arrow-right"></i></span>
+        <span class="flow-item"><span class="k">3</span>Peeling（TOC 剥离）</span>
+        <span class="flow-arrow"><i class="ph ph-arrow-right"></i></span>
+        <span class="flow-item"><span class="k">4</span>Skill Engine（生成技能库）</span>
       </div>
-      <div class="step-text">支持断点续跑：结果保存在浏览器 OPFS 的 <code>jobs/&lt;任务&gt;/.checkpoint.json</code>，重跑自动跳过已完成阶段。</div>
+      <div class="step-text mt-sm">支持断点续跑：结果保存在浏览器 OPFS 的 <code>jobs/&lt;任务&gt;/.checkpoint.json</code>，重跑自动跳过已完成阶段。</div>
     </div>
   </div>
 
+  <div class="tutorial-grid">
   <div class="tutorial-step">
     <div class="step-num">2</div>
     <div class="step-body">
@@ -69,7 +66,7 @@
           <li>MinerU 远程模式需要 <code>MINERU_API_KEY</code>；本地模式需要先在本地启动 MinerU 服务。</li>
         </ul>
       </div>
-      <div class="step-goto"><button class="btn btn-primary btn-sm" data-goto="config" data-anchor="apikey-section">前往配置 API Key →</button></div>
+      <div class="step-goto"><button class="btn btn-secondary btn-sm" data-goto="config" data-anchor="apikey-section">前往配置 API Key<i class="ph ph-arrow-right"></i></button></div>
     </div>
   </div>
 
@@ -84,7 +81,7 @@
           <li>点「获取模型列表」拉取该 Provider 可用模型（需先把 Provider 同步到服务端）。</li>
         </ul>
       </div>
-      <div class="step-goto"><button class="btn btn-primary btn-sm" data-goto="config" data-anchor="stage-cards">前往配置 Provider →</button></div>
+      <div class="step-goto"><button class="btn btn-secondary btn-sm" data-goto="config" data-anchor="stage-cards">前往配置 Provider<i class="ph ph-arrow-right"></i></button></div>
     </div>
   </div>
 
@@ -98,7 +95,7 @@
           <li>点「开始运行」，实时查看四阶段进度与日志；可随时停止，checkpoint 保证下次断点续跑（同一文件再次上传即自动续跑）。</li>
         </ul>
       </div>
-      <div class="step-goto"><button class="btn btn-primary btn-sm" data-goto="run" data-anchor="dropzone">前往上传运行 →</button></div>
+      <div class="step-goto"><button class="btn btn-secondary btn-sm" data-goto="run" data-anchor="dropzone">前往上传运行<i class="ph ph-arrow-right"></i></button></div>
     </div>
   </div>
 
@@ -108,13 +105,22 @@
       <div class="step-title">查看输出与导出</div>
       <div class="step-text">
         <ul>
-          <li><code>full.md</code> — Stage 1 解析结果；<code>full_chunks_original/</code>、<code>full_chunks/</code> — 分块与树结构（<code>chunks_index.json</code>、<code>tree.json</code>）。</li>
-          <li><code>generated_skills/</code> — 最终技能库：<code>SKILL.md</code> 主索引 + <code>references/</code> 分块文件。</li>
+          <li><code>full.md</code>：Stage 1 解析结果；<code>full_chunks_original/</code>、<code>full_chunks/</code>：分块与树结构（<code>chunks_index.json</code>、<code>tree.json</code>）。</li>
+          <li><code>generated_skills/</code>：最终技能库，含 <code>SKILL.md</code> 主索引与 <code>references/</code> 分块文件。</li>
           <li>在「输出」面板点击文件预览内容，可一键下载 zip（目录结构与命令行版 <code>outputs/&lt;书名&gt;/</code> 一致）。</li>
         </ul>
       </div>
-      <div class="step-goto"><button class="btn btn-primary btn-sm" data-goto="outputs">前往查看输出 →</button></div>
+      <div class="step-goto"><button class="btn btn-secondary btn-sm" data-goto="outputs">前往查看输出<i class="ph ph-arrow-right"></i></button></div>
     </div>
+  </div>
+  </div>
+
+  <div class="tutorial-cta">
+    <div class="tutorial-cta-copy">
+      <div class="tutorial-cta-title">准备好第一本教材了？</div>
+      <div class="tutorial-cta-sub">上传 PDF 或 Markdown，四阶段流水线即刻开始，全程本地运行。</div>
+    </div>
+    <button class="btn btn-primary" data-goto="run" data-anchor="dropzone"><i class="ph ph-play"></i>开始使用</button>
   </div>
 </div>
 
@@ -122,33 +128,36 @@
 <div class="panel" id="panel-config">
   <div class="error-banner" id="config-error"></div>
 
-  <h2>Provider 配置</h2>
-  <p class="subtitle">为每个阶段选择 Provider；Provider 的地址与模型在「Provider 管理」中维护（保存在浏览器 localStorage）。API Key 只存放在代理后端。</p>
-
-  <div class="btn-bar" style="margin-bottom:16px">
-    <button class="btn btn-secondary btn-sm" id="btn-import-providers">⬇ 从服务端导入 settings.yaml</button>
-    <button class="btn btn-ghost btn-sm" id="btn-sync-providers" title="把当前 Provider 注册表写回服务端 settings.yaml（模型列表获取等服务端功能依赖它）">⬆ 同步到服务端</button>
+  <div class="page-head">
+    <div>
+      <h2>Provider 配置</h2>
+      <p class="subtitle">为每个阶段选择 Provider；Provider 的地址与模型在「Provider 管理」中维护（保存在浏览器 localStorage）。API Key 只存放在代理后端。</p>
+    </div>
+    <div class="page-actions">
+      <button class="btn btn-secondary btn-sm" id="btn-import-providers"><i class="ph ph-download-simple"></i>从服务端导入</button>
+      <button class="btn btn-ghost btn-sm" id="btn-sync-providers" title="把当前 Provider 注册表写回服务端 settings.yaml（模型列表获取等服务端功能依赖它）"><i class="ph ph-upload-simple"></i>同步到服务端</button>
+    </div>
   </div>
 
   <!-- ── Stage routing cards ──────────────────────────────────── -->
   <div class="stage-cards" id="stage-cards">
     <div class="stage-card">
-      <div><span class="stage-num">1</span><span class="stage-label">Chunking</span></div>
+      <div class="stage-head"><span class="stage-num">1</span><span class="stage-label">Chunking</span></div>
       <label class="mt-sm">Provider</label>
       <select id="chunk-provider"></select>
-      <div class="stage-model"><strong>当前模型</strong><span id="chunk-model-display">—</span></div>
+      <div class="stage-model"><strong>当前模型</strong><span id="chunk-model-display">未配置</span></div>
     </div>
     <div class="stage-card">
-      <div><span class="stage-num">2</span><span class="stage-label">Peeling</span></div>
+      <div class="stage-head"><span class="stage-num">2</span><span class="stage-label">Peeling</span></div>
       <label class="mt-sm">Provider</label>
       <select id="peel-provider"></select>
-      <div class="stage-model"><strong>当前模型</strong><span id="peel-model-display">—</span></div>
+      <div class="stage-model"><strong>当前模型</strong><span id="peel-model-display">未配置</span></div>
     </div>
     <div class="stage-card">
-      <div><span class="stage-num">3</span><span class="stage-label">Skill Engine</span></div>
+      <div class="stage-head"><span class="stage-num">3</span><span class="stage-label">Skill Engine</span></div>
       <label class="mt-sm">Provider</label>
       <select id="skill-provider"></select>
-      <div class="stage-model"><strong>当前模型</strong><span id="skill-model-display">—</span></div>
+      <div class="stage-model"><strong>当前模型</strong><span id="skill-model-display">未配置</span></div>
     </div>
   </div>
 
@@ -198,7 +207,7 @@
       <button class="btn btn-ghost btn-sm" id="btn-cancel-new-provider">取消</button>
     </div>
   </div>
-  <button class="btn btn-secondary btn-sm" id="btn-add-provider">+ 新增 Provider</button>
+  <button class="btn btn-secondary btn-sm" id="btn-add-provider"><i class="ph ph-plus"></i>新增 Provider</button>
 
   <!-- ── PDF params ──────────────────────────────────────────── -->
   <div class="section-divider">
@@ -299,7 +308,7 @@
     <div class="mineru-sub" id="mineru-remote">
       <div class="key-row" style="margin-bottom:var(--space-md)">
         <strong>MINERU_API_KEY</strong>
-        <span class="key-badge key-missing" id="mu-key-badge">✗ 未设置</span>
+        <span class="key-badge key-missing" id="mu-key-badge"><i class="ph ph-x"></i>未设置</span>
         <input type="password" id="mu-api-key" placeholder="MINERU_API_KEY" style="max-width:240px">
         <button class="btn btn-sm btn-primary" id="btn-set-mu-key">设置</button>
       </div>
@@ -359,23 +368,25 @@
   <h2>运行 Pipeline</h2>
   <p class="subtitle">选择输入文件并启动处理流程。同一文件重复运行会自动断点续跑。</p>
 
-  <!-- ── Upload Card ──────────────────────────────────────────── -->
+  <div class="run-grid">
+  <!-- ── Input card ─────────────────────────────────────────────── -->
   <div class="card" id="upload-card">
     <h3 style="margin-bottom:12px">选择输入文件</h3>
-    <div class="file-input-zone" id="dropzone">
-      <div class="zone-icon">📄</div>
+    <div class="file-input-zone" id="dropzone" role="button" tabindex="0" aria-label="选择或拖拽上传 PDF / Markdown 文件">
+      <div class="zone-icon"><i class="ph ph-upload-simple"></i></div>
       <div class="zone-text">拖拽 PDF / Markdown 文件到此处，或点击选择</div>
       <div class="zone-hint">支持 .pdf / .md 格式，PDF 单文件最大 200MB（文件不离开浏览器）</div>
       <input type="file" id="upload-input" accept=".pdf,.md" style="display:none">
     </div>
     <div class="upload-error-card" id="upload-error" style="display:none">
-      <div class="upload-error-title" id="upload-error-title"></div>
+      <div class="upload-error-title" id="upload-error-title"><i class="ph ph-warning"></i><span id="upload-error-text"></span></div>
       <div class="upload-error-advice" id="upload-error-advice"></div>
     </div>
 
-    <div class="mt-sm" id="selected-file" style="display:none">
+    <div id="selected-file" style="display:none">
+      <i class="ph ph-file"></i>
       <span id="selected-file-name" style="font-weight:600"></span>
-      <span id="selected-file-size" style="color:var(--muted);margin-left:8px"></span>
+      <span id="selected-file-size"></span>
     </div>
 
     <div class="row mt-md">
@@ -396,19 +407,33 @@
           <option value="restart">全部清空重跑</option>
         </select>
       </div>
+      <div>
+        <label>输出名称（可选）</label>
+        <input type="text" id="output-name" placeholder="自动从文件名生成" maxlength="64" autocomplete="off" spellcheck="false">
+        <div class="field-hint" id="output-name-hint">命名规范：仅小写字母、数字和中划线（-），≤64 字符，不能以 - 开头/结尾或连续 --。该名称将作为 SKILL.md 的 name 字段。</div>
+      </div>
     </div>
 
     <div class="run-cta">
-      <button class="btn btn-primary" id="btn-start">开始运行</button>
-      <button class="btn btn-danger" id="btn-stop" style="display:none">停止</button>
-      <span id="run-status"></span>
+      <button class="btn btn-primary" id="btn-start"><i class="ph ph-play"></i>开始运行</button>
+      <button class="btn btn-danger" id="btn-stop" style="display:none"><i class="ph ph-stop"></i>停止</button>
     </div>
   </div>
 
-  <!-- ── Pipeline progress (4-stage flow) ──────────────────────── -->
-  <div class="pipeline-progress" id="pipeline-progress">
+  <!-- ── Status rail: run status + vertical 4-stage progress ────── -->
+  <aside class="status-rail" aria-label="任务状态">
+    <div class="rail-head">
+      <span class="rail-title">任务状态</span>
+      <span id="run-status"></span>
+    </div>
+    <div class="rail-empty">
+      <i class="ph ph-pulse"></i>
+      <span>开始运行后，这里显示四阶段实时进度</span>
+    </div>
+
+    <div class="pipeline-progress" id="pipeline-progress">
     <div class="pipeline-step pending" id="step-mineru">
-      <div class="step-dot">1</div>
+      <div class="step-dot"><span class="n">1</span><i class="ph ph-check"></i><i class="ph ph-x"></i></div>
       <div class="step-info">
         <span class="step-name">MinerU</span>
         <span class="step-detail" id="step-mineru-detail"></span>
@@ -416,7 +441,7 @@
     </div>
     <div class="pipeline-connector" id="conn-1"></div>
     <div class="pipeline-step pending" id="step-chunking">
-      <div class="step-dot">2</div>
+      <div class="step-dot"><span class="n">2</span><i class="ph ph-check"></i><i class="ph ph-x"></i></div>
       <div class="step-info">
         <span class="step-name">Chunking</span>
         <span class="step-detail" id="step-chunking-detail"></span>
@@ -424,7 +449,7 @@
     </div>
     <div class="pipeline-connector" id="conn-2"></div>
     <div class="pipeline-step pending" id="step-peeling">
-      <div class="step-dot">3</div>
+      <div class="step-dot"><span class="n">3</span><i class="ph ph-check"></i><i class="ph ph-x"></i></div>
       <div class="step-info">
         <span class="step-name">Peeling</span>
         <span class="step-detail" id="step-peeling-detail"></span>
@@ -432,17 +457,19 @@
     </div>
     <div class="pipeline-connector" id="conn-3"></div>
     <div class="pipeline-step pending" id="step-skill">
-      <div class="step-dot">4</div>
+      <div class="step-dot"><span class="n">4</span><i class="ph ph-check"></i><i class="ph ph-x"></i></div>
       <div class="step-info">
         <span class="step-name">Skill Engine</span>
         <span class="step-detail" id="step-skill-detail"></span>
       </div>
     </div>
+    </div>
+  </aside>
   </div>
 
   <!-- ── Pipeline Error Card ───────────────────────────────────── -->
   <div class="mineru-error-card" id="mineru-error">
-    <div class="mineru-error-title">⚠ 流水线错误</div>
+    <div class="mineru-error-title"><i class="ph ph-warning"></i>流水线错误</div>
     <div class="mineru-error-code" id="mineru-error-code"></div>
     <div class="mineru-error-advice" id="mineru-error-advice"></div>
   </div>
@@ -450,7 +477,7 @@
   <h3 class="mt-lg">运行日志</h3>
   <div class="log-box" id="log-box">
     <div class="log-placeholder">
-      <div class="log-placeholder-icon">⌘</div>
+      <div class="log-placeholder-icon"><i class="ph ph-terminal-window"></i></div>
       选择文件并点击「开始运行」
     </div>
   </div>
@@ -463,20 +490,20 @@
 
   <div class="outputs-header">
     <div class="btn-bar">
-      <select class="job-select" id="job-select"><option value="">— 选择任务 —</option></select>
-      <button class="btn btn-primary btn-sm" id="btn-download-zip">⬇ 下载 zip</button>
-      <button class="btn btn-danger btn-sm" id="btn-delete-job">🗑 删除任务</button>
+      <select class="job-select" id="job-select"><option value="">选择任务…</option></select>
+      <button class="btn btn-primary btn-sm" id="btn-download-zip"><i class="ph ph-download-simple"></i>下载 zip</button>
+      <button class="btn btn-danger btn-sm" id="btn-delete-job"><i class="ph ph-trash"></i>删除任务</button>
     </div>
     <div class="outputs-right">
       <span class="storage-usage" id="storage-usage"></span>
-      <button class="btn btn-ghost btn-sm" id="btn-refresh-outputs">↻ 刷新</button>
+      <button class="btn btn-ghost btn-sm" id="btn-refresh-outputs"><i class="ph ph-arrows-clockwise"></i>刷新</button>
     </div>
   </div>
 
   <div class="card">
     <div class="tree" id="output-tree">
       <div class="outputs-empty">
-        <div class="empty-icon">📂</div>
+        <div class="empty-icon"><i class="ph ph-folder-open"></i></div>
         <div class="empty-title">暂无输出</div>
         <div class="empty-desc">运行 Pipeline 后，输出文件将显示在这里</div>
       </div>
@@ -486,7 +513,7 @@
 </div>
 
 <!-- ── Toast ────────────────────────────────────────────────────── -->
-<div class="saved-toast" id="toast">✓ 已保存</div>
+<div class="saved-toast" id="toast"></div>
 
 <script type="module" src="/src/main.ts"></script>
 </body>

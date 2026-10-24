@@ -9,12 +9,16 @@ export function escapeHtml(s: unknown): string {
 
 export type ToastKind = 'success' | 'warn' | 'error';
 
-const TOAST_SYMBOLS: Record<ToastKind, string> = { success: '✓', warn: '⚠', error: '✕' };
+const TOAST_ICONS: Record<ToastKind, string> = {
+  success: 'ph-check-circle',
+  warn: 'ph-warning-circle',
+  error: 'ph-x-circle',
+};
 
 export function showToast(msg: string, kind: ToastKind = 'success'): void {
   const t = document.getElementById('toast');
   if (!t) return;
-  t.textContent = `${TOAST_SYMBOLS[kind]} ${msg}`;
+  t.innerHTML = `<i class="ph ${TOAST_ICONS[kind]}"></i><span>${escapeHtml(msg)}</span>`;
   t.classList.remove('toast-success', 'toast-warn', 'toast-error');
   t.classList.add('toast-' + kind, 'show');
   setTimeout(() => t.classList.remove('show'), kind === 'success' ? 2000 : 3200);

@@ -1,6 +1,7 @@
 import { Pdf2Skill } from '@pdf2skill/sdk';
 import type { JobMeta, OutputTreeNode } from '@pdf2skill/sdk';
 import { $, escapeHtml, errInfoOf, showToast } from '../ui/dom';
+import { syncSelect } from '../ui/dropdown';
 
 let pdf2skill: Pdf2Skill;
 let currentJobId = '';
@@ -32,15 +33,16 @@ async function refreshJobList(): Promise<void> {
   const sel = $('job-select') as HTMLSelectElement;
   const jobs = await pdf2skill.listJobs();
   const prev = currentJobId;
-  sel.innerHTML = '<option value="">— 选择任务 —</option>' + jobs
+  sel.innerHTML = '<option value="">选择任务…</option>' + jobs
     .map((j: JobMeta) => {
       const date = j.updatedAt ? new Date(j.updatedAt).toLocaleString() : '未知时间';
       const stages = j.completedStages.length ? `${j.completedStages.length}/4 阶段` : '未完成';
-      return `<option value="${escapeHtml(j.jobId)}">${escapeHtml(j.inputName)} · ${stages} · ${date}</option>`;
+      return `<option value="${escapeHtml(j.jobId)}">${escapeHtml(j.inputName)}（${stages}，${date}）</option>`;
     })
     .join('');
   if (prev && jobs.some((j) => j.jobId === prev)) sel.value = prev;
   currentJobId = sel.value;
+  syncSelect(sel);
 }
 
 // ── Tree rendering ────────────────────────────────────────────────
@@ -54,8 +56,8 @@ function renderTree(node: OutputTreeNode, parentEl: HTMLElement, pathPrefix: str
     const item = document.createElement('div');
     item.className = 'tree-item';
     if (child.type === 'dir') {
-      const countLabel = child.count != null ? `<span class="tree-size">${child.count} files</span>` : '';
-      item.innerHTML = `<span class="tree-icon">📁</span><span class="tree-name">${escapeHtml(child.name)}</span>${countLabel}`;
+      const countLabel = child.count != null ? `<span class="tree-size">${child.count} 项</span>` : '';
+      item.innerHTML = `<span class="tree-icon"><i class="ph ph-folder"></i></span><span class="tree-name">${escapeHtml(child.name)}</span>${countLabel}`;
       div.appendChild(item);
 
       const childrenDiv = document.createElement('div');
@@ -66,10 +68,11 @@ function renderTree(node: OutputTreeNode, parentEl: HTMLElement, pathPrefix: str
       item.addEventListener('click', () => {
         const open = childrenDiv.style.display !== 'none';
         childrenDiv.style.display = open ? 'none' : 'block';
+        item.querySelector('.tree-icon i')!.className = open ? 'ph ph-folder' : 'ph ph-folder-open';
         if (!open && !childrenDiv.hasChildNodes()) renderTree(child, childrenDiv, childPath);
       });
     } else {
-      item.innerHTML = `<span class="tree-icon">📄</span><span class="tree-name">${escapeHtml(child.name)}</span><span class="tree-size">${child.size ? fmtBytes(child.size) : ''}</span>`;
+      item.innerHTML = `<span class="tree-icon"><i class="ph ph-file-text"></i></span><span class="tree-name">${escapeHtml(child.name)}</span><span class="tree-size">${child.size ? fmtBytes(child.size) : ''}</span>`;
       item.addEventListener('click', () => void previewFile(childPath));
       div.appendChild(item);
     }
@@ -77,16 +80,18 @@ function renderTree(node: OutputTreeNode, parentEl: HTMLElement, pathPrefix: str
   }
 }
 
+const EMPTY_STATE = `
+  <div class="outputs-empty">
+    <div class="empty-icon"><i class="ph ph-folder-open"></i></div>
+    <div class="empty-title">暂无输出</div>
+    <div class="empty-desc">运行 Pipeline 后，输出文件将显示在这里</div>
+  </div>`;
+
 async function loadTree(): Promise<void> {
   const treeEl = $('output-tree');
   treeEl.innerHTML = '';
   if (!currentJobId) {
-    treeEl.innerHTML = `
-      <div class="outputs-empty">
-        <div class="empty-icon">📂</div>
-        <div class="empty-title">暂无输出</div>
-        <div class="empty-desc">运行 Pipeline 后，输出文件将显示在这里</div>
-      </div>`;
+    treeEl.innerHTML = EMPTY_STATE;
     return;
   }
   try {
@@ -94,7 +99,7 @@ async function loadTree(): Promise<void> {
     if (!tree.children || tree.children.length === 0) {
       treeEl.innerHTML = `
         <div class="outputs-empty">
-          <div class="empty-icon">📂</div>
+          <div class="empty-icon"><i class="ph ph-folder-open"></i></div>
           <div class="empty-title">暂无输出</div>
           <div class="empty-desc">该任务还没有输出文件</div>
         </div>`;
@@ -103,7 +108,7 @@ async function loadTree(): Promise<void> {
     renderTree(tree, treeEl, '');
   } catch (e) {
     const info = errInfoOf(e);
-    treeEl.innerHTML = `<div class="outputs-empty"><div class="empty-title">读取失败</div><div class="empty-desc">${escapeHtml(info.message)}</div></div>`;
+    treeEl.innerHTML = `<div class="outputs-empty"><div class="empty-icon"><i class="ph ph-warning"></i></div><div class="empty-title">读取失败</div><div class="empty-desc">${escapeHtml(info.message)}</div></div>`;
   }
 }
 
@@ -150,7 +155,7 @@ async function downloadZip(): Promise<void> {
     showToast('zip 已生成，正在下载');
   } catch (e) {
     const info = errInfoOf(e);
-    showToast('下载失败: ' + info.message + (info.advice ? ' — ' + info.advice : ''), 'error');
+    showToast('下载失败: ' + info.message + (info.advice ? '：' + info.advice : ''), 'error');
   }
 }
 

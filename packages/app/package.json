@@ -9,7 +9,11 @@
     "preview": "vite preview"
   },
   "dependencies": {
-    "@pdf2skill/sdk": "0.1.0"
+    "@fontsource-variable/jetbrains-mono": "^5.3.0",
+    "@fontsource-variable/noto-sans-sc": "^5.3.1",
+    "@fontsource-variable/space-grotesk": "^5.3.0",
+    "@pdf2skill/sdk": "0.1.0",
+    "@phosphor-icons/web": "^2.1.2"
   },
   "devDependencies": {
     "typescript": "^5.5.0",

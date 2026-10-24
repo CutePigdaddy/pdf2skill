@@ -1,6 +1,7 @@
-import { Pdf2Skill, isPdf2SkillError } from '@pdf2skill/sdk';
+import { Pdf2Skill, isPdf2SkillError, validateSkillName, slugifySkillName } from '@pdf2skill/sdk';
 import type { ResettableStage, StageEvent } from '@pdf2skill/sdk';
 import { $, escapeHtml, errInfoOf, showToast } from '../ui/dom';
+import { syncSelect } from '../ui/dropdown';
 
 const STAGE_KEYS = ['mineru', 'chunking', 'peeling', 'skill'] as const;
 
@@ -82,9 +83,38 @@ function hidePipelineError(): void {
 }
 
 function showUploadError(message: string, advice: string): void {
-  $('upload-error-title').textContent = message;
+  $('upload-error-text').textContent = message;
   $('upload-error-advice').textContent = advice || '';
   $('upload-error').style.display = 'block';
+}
+
+// ── Output name ───────────────────────────────────────────────────
+
+const OUTPUT_NAME_HINT =
+  '命名规范：仅小写字母、数字和中划线（-），≤64 字符，不能以 - 开头/结尾或连续 --。该名称将作为 SKILL.md 的 name 字段。';
+
+function outputNameInput(): HTMLInputElement {
+  return $('output-name') as HTMLInputElement;
+}
+
+/** Live-validate the output name field. Empty means auto-generate (valid). */
+function validateOutputNameField(): boolean {
+  const hint = $('output-name-hint');
+  const value = outputNameInput().value.trim();
+  if (!value) {
+    hint.textContent = OUTPUT_NAME_HINT;
+    hint.className = 'field-hint';
+    return true;
+  }
+  const issues = validateSkillName(value);
+  if (issues.length > 0) {
+    hint.textContent = `✗ ${issues[0]}。${OUTPUT_NAME_HINT}`;
+    hint.className = 'field-hint invalid';
+    return false;
+  }
+  hint.textContent = '✓ 符合命名规范';
+  hint.className = 'field-hint valid';
+  return true;
 }
 
 // ── File selection ────────────────────────────────────────────────
@@ -110,16 +140,35 @@ function selectFile(file: File): void {
   }
   $('upload-error').style.display = 'none';
   selectedFile = file;
-  $('selected-file').style.display = 'block';
+  // Clearing the inline style restores the stylesheet's flex layout.
+  $('selected-file').style.display = '';
   $('selected-file-name').textContent = file.name;
   $('selected-file-size').textContent = `${(file.size / 1024).toFixed(1)}KB`;
-  (document.getElementById('input-mode') as HTMLSelectElement).value = ext === 'pdf' ? 'pdf' : 'markdown';
+  const modeSelect = document.getElementById('input-mode') as HTMLSelectElement;
+  modeSelect.value = ext === 'pdf' ? 'pdf' : 'markdown';
+  syncSelect(modeSelect);
+
+  // Pre-fill the output name from the filename stem (kebab-case); leave it
+  // empty for non-ASCII stems so the pipeline auto-generates one.
+  const nameInput = outputNameInput();
+  if (!nameInput.value.trim()) {
+    const slug = slugifySkillName(file.name.replace(/\.[^.]*$/, ''));
+    if (slug) nameInput.value = slug;
+    validateOutputNameField();
+  }
 }
 
 function setupDropzone(): void {
   const zone = $('dropzone');
   const input = $('upload-input') as HTMLInputElement;
   zone.addEventListener('click', () => input.click());
+  // The dropzone is a div with role=button; give keyboard users the same path.
+  zone.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' || e.key === ' ') {
+      e.preventDefault();
+      input.click();
+    }
+  });
   input.addEventListener('change', () => {
     if (input.files && input.files.length > 0) selectFile(input.files[0]);
   });
@@ -153,6 +202,14 @@ async function startPipeline(): Promise<void> {
     return;
   }
 
+  // The output name becomes the SKILL.md `name`; enforce the kebab-case spec
+  // before starting so users get an actionable message instead of a broken skill.
+  const outputName = outputNameInput().value.trim();
+  if (!validateOutputNameField()) {
+    showToast('输出名称不符合命名规范，请修改后再运行', 'warn');
+    return;
+  }
+
   const mode = (document.getElementById('input-mode') as HTMLSelectElement).value as 'pdf' | 'markdown';
   const restartMode = (document.getElementById('restart-mode') as HTMLSelectElement).value;
 
@@ -167,6 +224,7 @@ async function startPipeline(): Promise<void> {
     const result = await pdf2skill.run(
       { kind: mode, file: selectedFile, name: selectedFile.name },
       {
+        outputName: outputName || undefined,
         restart: restartMode === 'restart',
         fromStage: RESTART_MODE_TO_STAGE[restartMode],
       },
@@ -176,7 +234,7 @@ async function startPipeline(): Promise<void> {
   } catch (e) {
     if (isPdf2SkillError(e) && e.code === 'ABORTED') {
       setStatus('已停止', 'status-failed');
-      appendLog('warn', '任务已中止 — 已完成阶段的 checkpoint 已保存，重新运行同一文件可断点续跑');
+      appendLog('warn', '任务已中止：已完成阶段的 checkpoint 已保存，重新运行同一文件可断点续跑');
     } else {
       const info = errInfoOf(e);
       setStatus('失败', 'status-failed');
@@ -200,6 +258,7 @@ async function startPipeline(): Promise<void> {
 export function setupRunTab(sdkInstance: Pdf2Skill): void {
   pdf2skill = sdkInstance;
   setupDropzone();
+  outputNameInput().addEventListener('input', validateOutputNameField);
   $('btn-start').addEventListener('click', () => void startPipeline());
   $('btn-stop').addEventListener('click', () => pdf2skill.abort());
 
