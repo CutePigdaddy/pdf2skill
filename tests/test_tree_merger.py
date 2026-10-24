@@ -21,6 +21,14 @@ class FakeLLM:
         return self.response
 
 
+@pytest.fixture(autouse=True)
+def _stub_llm_client(monkeypatch):
+    """TreeMerger.__init__ builds a real LLMClient, which requires configured
+    API keys (resolves providers from settings.yaml routers). CI has no .env,
+    and these tests never hit the LLM anyway — patch it module-wide."""
+    monkeypatch.setattr("core.tree_merger.LLMClient", lambda stage: FakeLLM())
+
+
 def make_merger(monkeypatch, response="", **overrides):
     fake = FakeLLM(response)
     monkeypatch.setattr("core.tree_merger.LLMClient", lambda stage: fake)
