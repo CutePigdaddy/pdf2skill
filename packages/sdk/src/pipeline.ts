@@ -10,7 +10,7 @@ import { SkillEngine } from './stages/skillEngine';
 import { RemoteMinerUClient, LocalMinerUClient } from './mineru/clients';
 import { CheckpointManager } from './storage/checkpoint';
 import { validatePdfFull, sanitizeFilename } from './pdf/validator';
-import { ensureDir, fileExists, listDir, readText, removeEntry, writeBytes, writeText } from './storage/opfs';
+import { ensureDir, fileExists, getDir, listDir, readText, removeEntry, writeBytes, writeText } from './storage/opfs';
 
 export interface PipelineInput {
   kind: 'pdf' | 'markdown';
@@ -23,6 +23,8 @@ export interface RunPipelineOptions {
   jobRoot: FileSystemDirectoryHandle;
   config: Pdf2SkillConfig;
   input: PipelineInput;
+  /** Pre-validated kebab-case skill name (user-specified output name). */
+  outputName?: string;
   fromStage?: ResettableStage;
   restart?: boolean;
   signal?: AbortSignal;
@@ -36,6 +38,24 @@ export interface PipelineResult {
   skillName: string;
   skillMd: string;
   referenceCount: number;
+}
+
+/**
+ * Stage 4 keeps its own checkpoint (generated_skills/.checkpoint.json) whose
+ * summaries are keyed by deterministic chunk ids. Any Stage 2/3 re-run
+ * rebuilds the tree with different boundaries under the same ids, so stale
+ * summaries must never survive into the new run.
+ */
+async function clearSkillCheckpoint(
+  jobRoot: FileSystemDirectoryHandle,
+  reason: string,
+  log: (level: 'info' | 'warn', message: string) => void,
+): Promise<void> {
+  const skillDir = await getDir(jobRoot, 'generated_skills');
+  if (skillDir && (await fileExists(skillDir, '.checkpoint.json'))) {
+    await removeEntry(skillDir, '.checkpoint.json');
+    log('info', `${reason}: removed stale generated_skills checkpoint`);
+  }
 }
 
 /**
@@ -67,9 +87,12 @@ export async function runPipeline(opts: RunPipelineOptions): Promise<PipelineRes
       await removeEntry(jobRoot, 'full.md');
       log('info', '--restart: removed stale full.md');
     }
+    await clearSkillCheckpoint(jobRoot, '--restart', log);
     log('info', '--restart: all checkpoint data cleared');
   } else if (opts.fromStage) {
     await checkpoint.resetFromStage(opts.fromStage);
+    // The tree is rebuilt below, so Stage 4's id-keyed summaries are stale.
+    await clearSkillCheckpoint(jobRoot, `--from-stage ${opts.fromStage}`, log);
     log('info', `--from-stage ${opts.fromStage}: checkpoint reset from '${opts.fromStage}' onwards`);
   }
 
@@ -202,6 +225,7 @@ export async function runPipeline(opts: RunPipelineOptions): Promise<PipelineRes
   const skillDir = await ensureDir(jobRoot, 'generated_skills');
   const engine = new SkillEngine(skillDir, createLlm('skill_engine'), {
     jobRoot,
+    skillName: opts.outputName,
     onProgress: (idx, total, title) =>
       stage('skill', 'active', {
         percent: Math.trunc((idx / total) * 100),

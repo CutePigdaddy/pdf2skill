@@ -4,12 +4,18 @@ import skillNamePrompt from '../prompts/skill_name.txt?raw';
 import type { LlmTransport } from './llmTransport';
 import { ChunkNode } from './treeMerger';
 import { charCount, codePoints } from './levenshtein';
+import { validateSkillName } from '../naming';
 import { CheckpointManager } from '../storage/checkpoint';
-import { dirExists, ensureDir, getDir, writeText, writeBytes } from '../storage/opfs';
+import { dirExists, ensureDir, fileExists, getDir, writeText, writeBytes } from '../storage/opfs';
 
 export interface SkillEngineOptions {
   /** Job root directory (parent of the skill output dir; images live at `<jobRoot>/images`). */
   jobRoot?: FileSystemDirectoryHandle;
+  /**
+   * User-specified skill name (already validated as kebab-case). When set it
+   * becomes the SKILL.md `name` verbatim and skips LLM name generation.
+   */
+  skillName?: string;
   /** Progress callback for chunk tagging (idx is 1-based). */
   onProgress?: (idx: number, total: number, title: string) => void;
   /** Logger for warnings/errors (defaults to console). */
@@ -64,10 +70,7 @@ export class SkillEngine {
 
   /** Kebab-case validation per the Claude Code skill spec. */
   static validateKebabName(name: string): boolean {
-    if (!name || charCount(name) > 64) return false;
-    if (!/^[a-z0-9-]+$/.test(name)) return false;
-    if (name.startsWith('-') || name.endsWith('-') || name.includes('--')) return false;
-    return true;
+    return validateSkillName(name).length === 0;
   }
 
   /** LLM name → regex conversion → timestamp fallback chain. */
@@ -157,41 +160,49 @@ export class SkillEngine {
     }
 
     let summaries = (this.checkpoint.getStageData('summaries') as Record<string, string>) ?? {};
+    // Attach the dict so later checkpoint.save() calls persist tagging progress.
+    this.checkpoint.state.data.summaries = summaries;
 
     // 2. Per-chunk tagging + reference files
     for (let idx = 1; idx <= allNodes.length; idx++) {
       const node = allNodes[idx - 1];
       this.opts.onProgress?.(idx, allNodes.length, node.title);
 
-      if (node.id in summaries) continue;
+      // Resume guard requires BOTH the summary and the reference file: a
+      // summary persisted before its file was written (crash in between,
+      // OPFS quota failure) must not permanently skip the file on resume,
+      // which would leave a SKILL.md dead link.
+      if (node.id in summaries && (await fileExists(refDir, `${node.id}.md`))) continue;
 
-      const preview = codePoints(node.content).slice(0, 2000).join('');
+      if (!(node.id in summaries)) {
+        const preview = codePoints(node.content).slice(0, 2000).join('');
 
-      if (!preview.trim()) {
-        summaries[node.id] = 'No explicit content';
-        continue;
+        if (!preview.trim()) {
+          summaries[node.id] = 'No explicit content';
+        } else {
+          const prompt = formatTemplate(this.prompts.skill, { content_preview: preview });
+
+          try {
+            let tags = (await this.llm.chat(prompt)).trim();
+            tags = tags
+              .replace(/[;\n；]/g, ' | ')
+              .replace(/\s*\|\s*/g, ' | ')
+              .replace(/\|\s+\|/g, '|');
+            summaries[node.id] = tags;
+
+            // Persistent progress tracking
+            this.checkpoint.state.data.summaries = summaries;
+            await this.checkpoint.save();
+          } catch (e) {
+            if ((e as Error).name === 'AbortError') throw e;
+            // Not written to summaries so the chunk is retried on re-run
+            this.log(`Error tagging chunk ${node.id}: ${e}`);
+          }
+        }
       }
 
-      const prompt = formatTemplate(this.prompts.skill, { content_preview: preview });
-
-      try {
-        let tags = (await this.llm.chat(prompt)).trim();
-        tags = tags
-          .replace(/[;\n；]/g, ' | ')
-          .replace(/\s*\|\s*/g, ' | ')
-          .replace(/\|\s+\|/g, '|');
-        summaries[node.id] = tags;
-
-        // Persistent progress tracking
-        this.checkpoint.state.data.summaries = summaries;
-        await this.checkpoint.save();
-      } catch (e) {
-        if ((e as Error).name === 'AbortError') throw e;
-        // Not written to summaries so the chunk is retried on re-run
-        this.log(`Error tagging chunk ${node.id}: ${e}`);
-      }
-
-      // 3. Reference Markdown with frontmatter
+      // 3. Reference Markdown with frontmatter — written for every node
+      // (empty-content ones included) so SKILL.md links never dangle.
       const pathStr = node.parentPath.length ? node.parentPath.join(' > ') : 'Root';
       const metadata = `---
 id: ${node.id}
@@ -205,11 +216,16 @@ end_line: ${node.endLine}
       await writeText(refDir, `${node.id}.md`, metadata + node.content);
     }
 
-    // 3. Master index — skill name via LLM + fallback chain
+    // 3. Master index — skill name via user input / LLM + fallback chain
     let kebabName: string;
     if (!this.checkpoint.isStageCompleted('skill_name')) {
-      const tocPreview = tocLines.join('\n');
-      kebabName = await this.generateSkillName(bookTitle, bookOverview, tocPreview);
+      if (this.opts.skillName) {
+        kebabName = this.opts.skillName;
+        this.log(`Using user-specified skill name: ${kebabName}`);
+      } else {
+        const tocPreview = tocLines.join('\n');
+        kebabName = await this.generateSkillName(bookTitle, bookOverview, tocPreview);
+      }
       await this.checkpoint.markStageCompleted('skill_name', { name: kebabName });
     } else {
       kebabName =

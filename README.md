@@ -132,6 +132,10 @@ const result = await pdf2skill.run({
   kind: 'markdown',
   file: new File([text], 'book.md', { type: 'text/markdown' }),
   name: 'book.md',
+}, {
+  // 可选：指定输出名称（kebab-case），同时用作输出目录名与 SKILL.md 的 name 字段。
+  // 不传则从文件名自动派生；校验规则见 validateSkillName()。
+  outputName: 'my-book-notes',
 });
 
 // 任务管理 / 输出浏览 / 导出
@@ -145,7 +149,7 @@ SDK 通过同源后端 `/api/llm/chat` 与 `/api/mineru/*` 调用 LLM 与 MinerU
 ### SDK 测试
 
 ```bash
-npm test   # vitest，88 个用例（分块 / 剥离 / 技能生成 / 流水线 / 门面 / 与 Python 录制回放逐字节对齐）
+npm test   # vitest，145 个用例（分块 / 剥离 / 技能生成 / 流水线 / 门面 / 命名校验 / 与 Python 录制回放逐字节对齐）
 ```
 
 ## 配置
@@ -300,19 +304,21 @@ utils/
   retry_client.py        # 带重试的 HTTP 客户端
   checkpoint.py          # 断点续传管理器
 prompts/                 # 各阶段 LLM 提示词模板
-tests/
-  test_e2e_real.py       # E2E 集成测试
-  test_mineru_stage.py   # MinerU Stage 单元测试
+tests/                   # pytest 测试（testpaths 已限定在此目录）
 ```
 
 ## 测试
 
 ```bash
-# E2E 测试（需配置 .env）
-python -m pytest tests/test_e2e_real.py
+# Python 单元测试（核心逻辑 + 代理安全 + 回归）
+python -m pytest tests -q
 
-# 详细输出
-python -m pytest tests/test_e2e_real.py -v
+# SDK 单元测试（145 个用例，vitest）
+npm test
+
+# 手工脚本（非 pytest 用例，需配置 .env，会调用真实 API）
+python tests/test_e2e_real.py
+python tests/test_mineru_stage.py
 ```
 
 ## 许可证

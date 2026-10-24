@@ -21,6 +21,7 @@ export type {
 } from './types';
 export { defaultConfig, mergeConfig, loadStoredConfig, saveStoredConfig, validateConfig } from './config';
 export type { ConfigIssue } from './config';
+export { SKILL_NAME_RULES, SKILL_NAME_MAX_LENGTH, validateSkillName, slugifySkillName } from './naming';
 export { Emitter } from './events';
 export { LlmClient } from './llm/llmClient';
 export type { LlmStage, ChatOptions } from './llm/llmClient';

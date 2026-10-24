@@ -6,6 +6,7 @@ from tqdm import tqdm
 from core.tree_merger import ChunkNode
 from utils.logger import logger
 from utils.llm_client import LLMClient
+from utils.naming import validate_skill_name
 from config.config import config
 from utils.checkpoint import CheckpointManager
 
@@ -63,13 +64,7 @@ class SkillEngine:
         - No leading, trailing, or consecutive hyphens
         - Maximum 64 characters
         """
-        if not name or len(name) > 64:
-            return False
-        if not re.fullmatch(r"[a-z0-9-]+", name):
-            return False
-        if name.startswith("-") or name.endswith("-") or "--" in name:
-            return False
-        return True
+        return not validate_skill_name(name)
 
     def _generate_skill_name(self, book_title: str, overview: str, toc: str) -> str:
         """Produce a spec-compliant kebab-case skill name.
@@ -106,6 +101,25 @@ class SkillEngine:
         fallback = f"skill-{int(time.time())}"
         logger.warning(f"Name fallback to timestamp: {fallback}")
         return fallback
+
+    def _write_reference_file(self, ref_dir: Path, node: ChunkNode) -> None:
+        """Write the per-chunk reference Markdown (frontmatter + content).
+
+        Written for every node — empty-content ones included — so the
+        SKILL.md index never links to a missing file. Idempotent.
+        """
+        ref_file = ref_dir / f"{node.id}.md"
+        path_str = ' > '.join(node.parent_path) if node.parent_path else 'Root'
+        metadata = f"""---
+id: {node.id}
+title: {node.title}
+parent_path: {path_str}
+start_line: {node.start_line}
+end_line: {node.end_line}
+---
+
+"""
+        ref_file.write_text(metadata + node.content, encoding="utf-8")
 
     def generate(self, root_node: ChunkNode, book_title: str):
         """Orchestrate the full skill generation process.
@@ -164,55 +178,51 @@ class SkillEngine:
             metadata_desc = stage_data.get("metadata_desc", "")
 
         summaries = checkpoint.get_stage_data("summaries") or {}
+        # Attach the dict so later checkpoint.save() calls persist progress.
+        checkpoint.state["data"]["summaries"] = summaries
 
         # 2. Individual Chunk Tagging
         bar = tqdm(total=len(all_nodes), desc="Skill标签", unit="chunk", ncols=80)
         try:
             for idx, node in enumerate(all_nodes, 1):
-                if node.id in summaries:
+                # Resume guard requires BOTH the summary and the reference
+                # file: a summary persisted before its file was written
+                # (crash in between) must not permanently skip the file on
+                # resume, which would leave a SKILL.md dead link.
+                if node.id in summaries and (ref_dir / f"{node.id}.md").exists():
                     bar.update(1)
                     continue
 
-                bar.set_postfix_str(node.title[:20])
-                preview = node.content[:2000] # Use a preview to save tokens
+                if node.id not in summaries:
+                    bar.set_postfix_str(node.title[:20])
+                    preview = node.content[:2000] # Use a preview to save tokens
 
-                if not preview.strip():
-                    summaries[node.id] = "No explicit content"
-                    bar.update(1)
-                    continue
+                    if not preview.strip():
+                        summaries[node.id] = "No explicit content"
+                    else:
+                        prompt = self.skill_prompt.format(content_preview=preview)
 
-                prompt = self.skill_prompt.format(content_preview=preview)
+                        try:
+                            tags = self.llm.chat(prompt).strip()
+                            # Normalize separators: semicolons (both EN/CN) and newlines → " | "
+                            tags = re.sub(r"[;\n；]", " | ", tags)
+                            tags = re.sub(r"\s*\|\s*", " | ", tags)
+                            tags = re.sub(r"\|\s+\|", "|", tags)
+                            summaries[node.id] = tags
 
-                try:
-                    tags = self.llm.chat(prompt).strip()
-                    # Normalize separators: semicolons (both EN/CN) and newlines → " | "
-                    tags = re.sub(r"[;\n；]", " | ", tags)
-                    tags = re.sub(r"\s*\|\s*", " | ", tags)
-                    tags = re.sub(r"\|\s+\|", "|", tags)
-                    summaries[node.id] = tags
-
-                    # Persistent progress tracking
-                    checkpoint.state["data"]["summaries"] = summaries
-                    checkpoint.save()
-                except Exception as e:
-                    logger.error(f"Error tagging chunk {node.id}: {e}")
-                    # Not written to summaries so chunk can be retried on re-run
+                            # Persistent progress tracking
+                            checkpoint.state["data"]["summaries"] = summaries
+                            checkpoint.save()
+                        except Exception as e:
+                            logger.error(f"Error tagging chunk {node.id}: {e}")
+                            # Not written to summaries so chunk can be retried on re-run
 
                 bar.update(1)
 
-                # 3. Save reference Markdown with frontmatter
-                ref_file = ref_dir / f"{node.id}.md"
-                path_str = ' > '.join(node.parent_path) if node.parent_path else 'Root'
-                metadata = f"""---
-id: {node.id}
-title: {node.title}
-parent_path: {path_str}
-start_line: {node.start_line}
-end_line: {node.end_line}
----
-
-"""
-                ref_file.write_text(metadata + node.content, encoding="utf-8")
+                # 3. Save reference Markdown — after tagging but guarded by the
+                # resume check above, so a crash between save() and the write
+                # is repaired on the next run instead of leaving a dead link.
+                self._write_reference_file(ref_dir, node)
         except KeyboardInterrupt:
             bar.close()
             tagged = len(summaries)

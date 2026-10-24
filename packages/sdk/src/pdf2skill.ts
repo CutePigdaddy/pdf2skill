@@ -10,6 +10,7 @@ import type {
 import { Pdf2SkillError } from './errors';
 import { Emitter } from './events';
 import { defaultConfig, loadStoredConfig, mergeConfig, saveStoredConfig } from './config';
+import { SKILL_NAME_RULES, validateSkillName } from './naming';
 import type { LlmTransport } from './stages/llmTransport';
 import type { LlmStage } from './llm/llmClient';
 import { runPipeline } from './pipeline';
@@ -101,7 +102,10 @@ export class Pdf2Skill {
   }
 
   private async jobRoot(jobId: string): Promise<FileSystemDirectoryHandle> {
-    if (!/^[A-Za-z0-9._-]+$/.test(jobId)) {
+    // One path segment: letters/digits (any script), dot, underscore, hyphen.
+    // Unicode letters are allowed so filename-derived job IDs (e.g. Chinese
+    // book names) stay browsable; '.'/'..' are rejected as traversal.
+    if (!/^[\p{L}\p{N}._-]{1,100}$/u.test(jobId) || /^[.]+$/.test(jobId)) {
       throw new Pdf2SkillError('INVALID_JOB_ID', `非法的任务 ID: ${jobId}`, '');
     }
     const dir = await getDir(await this.jobsDir(), jobId);
@@ -175,13 +179,28 @@ export class Pdf2Skill {
     if (this.abortController) {
       throw new Pdf2SkillError('ALREADY_RUNNING', '已有任务正在运行', '请先等待完成或调用 abort()');
     }
+
+    // The output name becomes the output directory name and the SKILL.md
+    // frontmatter `name`, so it must satisfy the kebab-case skill spec.
+    const outputName = options.outputName?.trim() || undefined;
+    if (outputName) {
+      const issues = validateSkillName(outputName);
+      if (issues.length > 0) {
+        throw new Pdf2SkillError(
+          'INVALID_OUTPUT_NAME',
+          `输出名称 '${outputName}' 不符合命名规范：${issues[0]}`,
+          `${SKILL_NAME_RULES} 也可以留空，自动从文件名生成。`,
+        );
+      }
+    }
+
     const controller = new AbortController();
     this.abortController = controller;
     if (options.signal) {
       options.signal.addEventListener('abort', () => controller.abort(), { once: true });
     }
 
-    const jobId = Pdf2Skill.jobIdFor(input.name);
+    const jobId = outputName ?? Pdf2Skill.jobIdFor(input.name);
     const jobs = await this.jobsDir();
     const jobRoot = await ensureDir(jobs, jobId);
     this.runningJobId = jobId;
@@ -198,7 +217,7 @@ export class Pdf2Skill {
     await this.writeJobMeta(jobRoot, meta);
 
     try {
-      const result = await this.execute(jobRoot, input, options, controller.signal, meta);
+      const result = await this.execute(jobRoot, input, { ...options, outputName }, controller.signal, meta);
       return { jobId, ...result };
     } finally {
       this.abortController = null;
@@ -266,6 +285,7 @@ export class Pdf2Skill {
         jobRoot,
         config,
         input: { kind: input.kind, bytes, filename: input.name },
+        outputName: options.outputName,
         fromStage: options.fromStage,
         restart: options.restart,
         signal,

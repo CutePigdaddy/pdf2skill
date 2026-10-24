@@ -203,6 +203,40 @@ describe('Pdf2Skill facade', () => {
     const { sdk } = makeSdk();
     await expect(sdk.resume('missing-job')).rejects.toMatchObject({ code: 'JOB_NOT_FOUND' });
   });
+
+  it('run with outputName uses it as jobId and SKILL.md name (no LLM naming)', async () => {
+    const { sdk, llm } = makeSdk();
+    const result = await sdk.run({
+      kind: 'markdown',
+      file: file(),
+      name: 'facade book.md',
+    }, { outputName: 'my-custom-skill' });
+    expect(result.jobId).toBe('my-custom-skill');
+    expect(result.skillName).toBe('my-custom-skill');
+
+    // The name prompt is never consulted; tagging still runs.
+    expect(llm.tagCalls.length).toBe(3);
+    const skill = await sdk.readOutputFile('my-custom-skill', 'generated_skills/SKILL.md');
+    expect((skill as { content: string }).content).toContain('name: my-custom-skill');
+
+    const jobs = await sdk.listJobs();
+    expect(jobs.map((j) => j.jobId)).toEqual(['my-custom-skill']);
+  });
+
+  it('run rejects a non-kebab outputName with INVALID_OUTPUT_NAME', async () => {
+    const { sdk } = makeSdk();
+    await expect(
+      sdk.run({ kind: 'markdown', file: file(), name: 'facade book.md' }, { outputName: '我的 书名!' }),
+    ).rejects.toMatchObject({ code: 'INVALID_OUTPUT_NAME' });
+    await expect(
+      sdk.run({ kind: 'markdown', file: file(), name: 'facade book.md' }, { outputName: '-bad-' }),
+    ).rejects.toMatchObject({ code: 'INVALID_OUTPUT_NAME' });
+    await expect(
+      sdk.run({ kind: 'markdown', file: file(), name: 'facade book.md' }, { outputName: 'My Book' }),
+    ).rejects.toMatchObject({ code: 'INVALID_OUTPUT_NAME' });
+    // Nothing was created by the rejected runs.
+    expect(await sdk.listJobs()).toEqual([]);
+  });
 });
 
 describe('Pdf2Skill config semantics', () => {

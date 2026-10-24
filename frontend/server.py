@@ -33,11 +33,43 @@ OUTPUTS_DIR = PROJECT_ROOT / "outputs"
 LOGS_DIR = PROJECT_ROOT / "logs"
 FRONTEND_DIR = Path(__file__).parent
 
+# Allow project-root imports (utils/, core/) when run as `python frontend/server.py`
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+
+from utils.naming import SKILL_NAME_RULES, validate_skill_name  # noqa: E402
+
 # Validation patterns for provider config (shared by config + apikey endpoints)
 PROVIDER_NAME_RE = re.compile(r"^[a-z0-9][a-z0-9_-]*$")
 ENV_VAR_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
+
+def _output_name_part(output_dir: str) -> str:
+    """Reduce a user-typed output dir ('outputs/<name>', '<name>', ...) to its name part."""
+    part = output_dir.strip().replace("\\", "/").rstrip("/")
+    if part.lower().startswith("outputs/"):
+        part = part[len("outputs/"):]
+    return part
+
 app = FastAPI(title="pdf2skill")
+
+
+# DEPRECATED backend — if it is ever started, keep the same DNS-rebinding
+# defense as proxy_server.py: only allowlisted Host headers get through.
+_ALLOWED_HOSTS = {"127.0.0.1:8501", "localhost:8501"}
+_ALLOWED_HOSTS |= {
+    h.strip().lower()
+    for h in os.getenv("PDF2SKILL_ALLOWED_HOSTS", "").split(",")
+    if h.strip()
+}
+
+
+@app.middleware("http")
+async def check_host(request, call_next):
+    host = (request.headers.get("host") or "").lower()
+    if host not in _ALLOWED_HOSTS:
+        return PlainTextResponse(f"forbidden host: {host or '(missing)'}", status_code=403)
+    return await call_next(request)
 
 
 @app.middleware("http")
@@ -505,6 +537,16 @@ def start_pipeline(body: dict):
     output_dir = body.get("output_dir", "")
     from_stage = body.get("from_stage", "")
     restart = body.get("restart", False)
+
+    # The output dir name flows into the generated skill package, so enforce
+    # the kebab-case naming spec on user-provided names (empty = auto).
+    if output_dir and _output_name_part(output_dir):
+        issues = validate_skill_name(_output_name_part(output_dir))
+        if issues:
+            raise HTTPException(
+                400,
+                f"输出目录名称不符合命名规范：{issues[0]}。{SKILL_NAME_RULES} 留空则自动从文件名生成。",
+            )
 
     # Validate from_stage against allowed stage names
     VALID_STAGES = ["pdf_conversion", "llm_chunking", "tree_merging"]

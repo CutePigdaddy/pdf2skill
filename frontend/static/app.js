@@ -54,6 +54,23 @@ function errInfoOf(e) {
   return e && e.errInfo ? e.errInfo : { code: 'UNKNOWN', message: (e && e.message) || String(e), advice: '' };
 }
 
+// ── Output name rules (mirror utils/naming.py / @pdf2skill/sdk naming.ts) ──
+const OUTPUT_NAME_RULES = '仅限小写字母、数字和中划线（-），长度 ≤ 64 字符，不能以 - 开头/结尾或连续 --';
+
+function validateSkillNameJs(name) {
+  if (!name) return '名称不能为空';
+  if ([...name].length > 64) return '长度超过 64 个字符';
+  if (!/^[a-z0-9-]+$/.test(name)) return '只能包含小写字母、数字和中划线（-）';
+  if (name.startsWith('-') || name.endsWith('-')) return '不能以中划线（-）开头或结尾';
+  if (name.includes('--')) return '不能包含连续中划线（--）';
+  return '';
+}
+
+function slugifySkillNameJs(text) {
+  return text.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/-+/g, '-')
+    .replace(/^-+|-+$/g, '').slice(0, 64).replace(/-+$/, '');
+}
+
 // ── Tabs & navigation ────────────────────────────────────────────
 function switchTab(tabId) {
   document.querySelectorAll('.tab').forEach(t => t.classList.toggle('active', t.dataset.tab === tabId));
@@ -442,7 +459,10 @@ async function loadInputs() {
     if (opt) {
       document.getElementById('input-mode').value = opt.toLowerCase().endsWith('.md') ? 'markdown' : 'pdf';
       const stem = opt.replace(/\.[^.]+$/, '');
-      document.getElementById('output-dir').value = 'outputs/' + stem;
+      // Pre-fill with the kebab-case slug; non-ASCII stems leave the field
+      // empty so the server auto-derives the output dir from the filename.
+      const slug = slugifySkillNameJs(stem);
+      document.getElementById('output-dir').value = slug ? 'outputs/' + slug : '';
     }
     loadCheckpoint();
   };
@@ -615,6 +635,19 @@ async function loadCheckpoint() {
 async function startPipeline() {
   const inputFile = document.getElementById('input-file').value;
   if (!inputFile) { alert('请选择输入文件'); return; }
+
+  // Client-side mirror of the server's /api/run output-name check so the
+  // naming-convention error surfaces before a run is even attempted.
+  const outputDirEl = document.getElementById('output-dir');
+  const namePart = outputDirEl.value.trim().replace(/\\/g, '/').replace(/\/+$/, '')
+    .replace(/^outputs\//i, '');
+  if (namePart) {
+    const issue = validateSkillNameJs(namePart);
+    if (issue) {
+      alert(`输出目录名称不符合命名规范：${issue}。规范：${OUTPUT_NAME_RULES}。留空则自动从文件名生成。`);
+      return;
+    }
+  }
 
   const restartMode = document.getElementById('restart-mode').value;
   const body = {

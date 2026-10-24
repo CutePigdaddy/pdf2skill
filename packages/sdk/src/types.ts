@@ -90,6 +90,12 @@ export type RunInput =
 export interface RunOptions {
   fromStage?: ResettableStage;
   restart?: boolean;
+  /**
+   * User-specified output name (kebab-case; see `validateSkillName`). Used as
+   * the output directory name AND the SKILL.md frontmatter `name`. When
+   * omitted, a name is derived from the input filename.
+   */
+  outputName?: string;
   /** External abort signal (equivalent to calling Pdf2Skill.abort()). */
   signal?: AbortSignal;
 }
