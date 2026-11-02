@@ -27,47 +27,111 @@ PDF ──► MinerU ──► Chunking ──► Peeling ──► Skill Engine
 - Stage 3 (Peeling)：递归剥离超过阈值的大块（TOC 剥离），生成最终 chunk 树
 - Stage 4 (Skill Engine)：为每个 chunk 生成 SKILL.md 索引和参考文件（每次都重跑）
 
-## 快速开始
+## 快速启动
 
-### 1. 安装
+第一次使用建议选 **Web 工作台**：配置、运行、断点续跑和下载都在浏览器里完成，不用记命令行参数。只想用命令行、或服务器上没有 Node.js，用下面的 **CLI**。两种方式共用同一套 Python 依赖。以下命令均在项目根目录执行。
+
+### 0. 安装 Python 依赖（通用）
+
+需要 Python 3.10+。
 
 ```bash
 python -m venv venv
+
 # Windows
 venv\Scripts\activate
 # Linux / macOS
 source venv/bin/activate
 
-pip install -r requirements.txt
+python -m pip install -r requirements.txt
 ```
 
-### 2. 配置
+### 方式 A：Web 工作台（推荐第一次使用）
 
-首次运行 `python main.py` 会自动启动引导向导，逐步完成配置。也可手动创建 `.env`：
+额外需要 Node.js 18+。工作台包含教程、配置、运行、输出四个页面。
 
 ```bash
-cp .env.example .env
-# 编辑 .env 填入 API Key
+npm install
+npm run build            # 构建 SDK + 工作台；首次和改前端代码后需要
+python frontend/server.py
 ```
 
-最小配置只需一个 LLM Provider Key + MINERU_API_KEY（remote 模式时）。
+打开 **http://localhost:8501**，完成首次配置：
 
-### 3. 运行
+1. **配置 → Provider 管理**：确认或新增 Provider，填写 `base_url` 和三个阶段模型。
+2. **配置 → API Keys**：填 LLM Key 后点该行的「设置」；MinerU remote 模式再填 `MINERU_API_KEY`。设置后 Key 会写入服务端 `.env`，重启后保留，不保存在浏览器。
+3. **保存配置**：把 Provider、模型、PDF 与 MinerU 参数同步到 `config/settings.yaml`。
+4. **运行**：上传 PDF 或 Markdown，点「开始运行」；完成后在「输出」页下载整包 zip 或 Skill zip。
 
-**交互式测试（推荐新手）**
+> 使用自部署 MinerU 时，在配置页切换到「本地模式」并填写 Gradio 地址，不需要 `MINERU_API_KEY`。
+> 如果页面提示「代理后端未连接」，请确认是用 `python frontend/server.py` 启动的（它同时提供界面与 `/api/*`），而不是普通静态文件服务器。
 
-```bash
-python run_test.py
-```
-
-**命令行直接调用**
+### 方式 B：CLI（只要 Python，适合批处理）
 
 ```bash
 python main.py "path/to/book.pdf"
-python main.py "path/to/book.pdf" --output outputs
 ```
 
-**断点续传**
+首次运行会自动启动引导向导，按提示填写 Provider、模型、MinerU 和 Key（写入 `.env`）。也可以手动创建：
+
+```bash
+cp .env.example .env
+# 编辑 .env，至少填一个 LLM Provider Key；remote MinerU 还需 MINERU_API_KEY
+```
+
+输出在 `outputs/<任务名>/`。常用续跑命令：
+
+```bash
+python main.py "path/to/book.pdf" --from-stage llm_chunking  # 保留 Stage 1，只重跑分块
+python main.py "path/to/book.pdf" --restart                  # 清空断点，全部重来
+```
+
+更多参数见「CLI 使用」。
+
+### 第一次启动检查
+
+- **打不开 8501**：确认 `python frontend/server.py` 还在运行，端口没有被其他程序占用。
+- **提示未连接代理后端**：正式使用请用 `frontend/server.py`（同时提供界面与 `/api/*`）；只有开发模式才分开启动 `proxy_server.py` + Vite。
+- **报 `NO_API_KEY`**：到「配置 → API Keys」设置对应 Provider 的 Key；远程 MinerU 还需要 `MINERU_API_KEY`。
+- **通过反向代理或换端口访问**：启动前用 `PDF2SKILL_ALLOWED_HOSTS` 追加实际 Host，否则会被 DNS rebinding 防护拒绝。
+
+## Web 工作台说明
+
+`server.py` 同时托管构建后的工作台与 `/api/*` 代理（LLM / MinerU 转发）。API Key 只保存在服务端：在「配置」面板设置后会写入项目根目录 `.env` 并立即生效，重启后仍保留；运行时的 LLM 请求只携带 Provider 名称，浏览器不会拿到 Key。前端开发时改用下文的 Vite 开发模式。
+
+「配置」面板的 Provider、模型、思考强度、PDF 与 MinerU 参数会先保存到浏览器 localStorage，点「保存配置」时再同步写入 `config/settings.yaml`；新浏览器或换 origin 打开时会自动从服务端恢复配置，「从服务端导入」也可手动恢复。
+
+「运行」页可以直接选择当前浏览器 OPFS 中已完成 Stage 1 的任务继续，无需重新上传原文件；「输出」页也提供「继续任务」入口。浏览器任务按 origin 隔离（`127.0.0.1:8501`、`localhost:8501`、`5173` 各自独立）。
+
+CLI 写在项目根目录 `outputs/` 的任务不会自动出现在浏览器列表里，但可以在「运行」页点「从磁盘导入任务」：服务端 `GET /api/jobs` 列出可续跑的磁盘任务，`GET /api/jobs/{id}/bundle` 打包 checkpoint、`full.md`、图片、分块与技能文件，浏览器解压写入 OPFS 后即可按原有阶段数继续。打包会排除 `splits/`、MinerU 分段目录与原始 zip。同名任务不会被覆盖，需先在「输出」页删除旧任务。
+
+「运行」页日志默认只显示阶段与关键状态，带时间戳和级别；勾选「详细」可展开逐 chunk、锚点与缓存日志，日志最多保留 500 行。
+
+开发模式（前端热更新）：
+
+```bash
+# 终端 1：代理后端（8502）
+python frontend/proxy_server.py
+# 终端 2：Vite 开发服务器
+npm run dev:app
+# 浏览器访问 http://localhost:5173
+```
+
+## CLI 使用
+
+```bash
+# 交互式选择文件与参数
+python run_test.py
+
+# 直接处理
+python main.py "path/to/book.pdf"
+python main.py "path/to/book.pdf" --output outputs
+
+# 只配置，不运行
+python main.py --setup
+```
+
+断点续传：
 
 ```bash
 # 从 Stage 2 重新开始（保留 Stage 1 结果）
@@ -85,49 +149,25 @@ python main.py "path/to/book.pdf" --restart
 
 Stage 2 本身是一次 LLM 规划调用（失败重试一次），没有可切的中间进度；Stage 3 的 Peeling 才按子树缓存。
 
-**Web 界面（单入口）**
-
-```bash
-npm install
-npm run build            # 构建新版工作台到 packages/app/dist
-python frontend/server.py
-# 浏览器访问 http://localhost:8501
-```
-
-`server.py` 同时托管构建后的新版工作台与 `/api/*` 代理（LLM / MinerU 转发）。API Key 只保存在服务端：在「配置」面板设置后会写入项目根目录 `.env` 并立即生效，重启后仍保留；Key 不会进入浏览器。前端开发时改用下文的 Vite 开发模式。
-
-「配置」面板的 Provider、模型、思考强度、PDF 与 MinerU 参数会先保存到浏览器 localStorage，点「保存配置」时再同步写入 `config/settings.yaml`；「从服务端导入」可把服务端配置完整恢复到当前浏览器。各参数也可继续直接编辑这两个文件。
-
-新版工作台的「运行」页可直接选择当前浏览器 OPFS 中已完成 Stage 1 的任务继续，无需重新上传原文件；「输出」页也提供「继续任务」入口。浏览器任务按 origin 隔离（`127.0.0.1:8501`、`localhost:8501`、`5173` 各自独立）。
-
-CLI 写在项目根目录 `outputs/` 的任务不会自动出现在浏览器列表里，但可以在「运行」页点「从磁盘导入任务」：服务端 `GET /api/jobs` 列出可续跑的磁盘任务，`GET /api/jobs/{id}/bundle` 打包 checkpoint、`full.md`、图片、分块与技能文件，浏览器解压写入 OPFS 后即可按原有阶段数继续。打包会排除 `splits/`、MinerU 分段目录与原始 zip（Stage 1 已完成，不需要它们）。同名任务不会被覆盖，需先在「输出」页删除旧任务。
-
-「运行」页日志默认只显示阶段与关键状态，带时间戳和级别；勾选「详细」可展开逐 chunk、锚点与缓存日志，日志最多保留 500 行。
-
 ## 纯前端模式（SDK + 演示界面）
 
 除 Python CLI 外，项目提供 TypeScript SDK：流水线四阶段（分块 / 树剥离 / 技能生成）、PDF 校验、checkpoint 断点续传、文件存储（OPFS）、zip 导出**全部在浏览器内完成**。后端瘦身为纯代理，只做两件事：
 
-1. **LLM 转发**（`POST /api/llm/chat`）——持有 API Key，Key 永不进入浏览器
+1. **LLM 转发**（`POST /api/llm/chat`）——持有 API Key，Key 不进入浏览器
 2. **MinerU 转发**（`/api/mineru/*`）——官方 API 与自部署 Gradio 全部经代理访问
 
-### 启动（开发模式）
-
-```bash
-npm install
-
-# ① 启动代理后端（端口 8502，读取 .env 与 config/settings.yaml）
-python frontend/proxy_server.py
-
-# ② 启动演示界面（新终端）
-npm run dev:app
-# 浏览器访问 http://localhost:5173
-```
+SDK 不是纯静态即可用：需要部署一个持有 Key 的服务端代理（本仓库的 `frontend/proxy_server.py`，或按相同接口实现的服务），并通过 `backendBaseUrl` 指向它；同源部署时保持空字符串即可。浏览器需要 HTTPS 或 localhost（OPFS / Web Crypto 依赖 secure context）。
 
 ### 在自己的前端项目中使用 SDK
 
+SDK 目前是 workspace 包（尚未发布到 npm）。先在本仓库构建，再从目标项目安装：
+
 ```bash
-npm install @pdf2skill/sdk jszip pdf-lib pdfjs-dist
+# 1. 在本仓库构建
+npm run build
+
+# 2. 在目标项目安装（本地路径，或发布到私有 registry 后用包名）
+npm install /path/to/pdf2skill/packages/sdk jszip pdf-lib
 ```
 
 ```ts
@@ -135,7 +175,7 @@ import { Pdf2Skill } from '@pdf2skill/sdk';
 
 const pdf2skill = new Pdf2Skill({
   config: {
-    providers: { 'my-provider': { base_url: 'https://api.example.com/v1', api_key_env: 'MY_KEY' } },
+    providers: { 'my-provider': { base_url: 'https://api.example.com/v1', api_key_env: 'MY_PROVIDER_API_KEY' } },
     routers: { chunking: 'my-provider', peeling: 'my-provider', skillEngine: 'my-provider' },
   },
 });
@@ -175,7 +215,7 @@ const imported = await pdf2skill.importJob(
 console.log(imported.completedStages); // ['pdf_conversion', 'llm_chunking', ...]
 ```
 
-SDK 通过同源后端 `/api/llm/chat` 与 `/api/mineru/*` 调用 LLM 与 MinerU，部署时需保证页面与代理后端同源（或同域反代）。中断后重新运行同一文件自动从 checkpoint 续跑；`abort()`、`resume()`、`importJob()`、`deleteJob()` 语义与 CLI 一致。`resume()` 只依赖 OPFS 中的 Stage 1 markdown，因此 `listJobs()` 用 `resumable` 标记哪些任务可以不再上传原文件直接继续。
+代理服务的 `.env` 中需要有 `MY_PROVIDER_API_KEY`；浏览器只会把 Provider 名称发给代理。SDK 通过 `backendBaseUrl` 指向的代理调用 `/api/llm/chat` 与 `/api/mineru/*`，同源部署时留空即可；跨域部署时需同时配置代理的 CORS 与 Host 白名单。中断后重新运行同一文件自动从 checkpoint 续跑；`abort()`、`resume()`、`importJob()`、`deleteJob()` 语义与 CLI 一致。`resume()` 只依赖 OPFS 中的 Stage 1 markdown，因此 `listJobs()` 用 `resumable` 标记哪些任务可以不再上传原文件直接继续。
 
 ### SDK 测试
 
@@ -186,6 +226,8 @@ npm test   # vitest，167 个用例（分块 / 剥离与缓存 / 技能生成 / 
 ## 配置
 
 ### .env vs settings.yaml
+
+通过 Web 工作台设置 API Key 或点「保存配置」会自动写入对应文件；下表用于决定手动编辑时改哪个。
 
 | 场景 | 改哪个 |
 |------|--------|
@@ -211,16 +253,16 @@ npm test   # vitest，167 个用例（分块 / 剥离与缓存 / 技能生成 / 
 | `peeling_reasoning_effort` | Stage 3 的思考强度（可选） |
 | `skill_engine_reasoning_effort` | Stage 4 的思考强度（可选） |
 
-**内置 Provider 示例：**
+**Provider 示例：**
 
 | Provider | base_url | api_key_env | 说明 |
 |----------|----------|-------------|------|
 | siliconflow | `https://api.siliconflow.cn/v1` | `SILICONFLOW_API_KEY` | SiliconFlow 官方平台 |
 | google | `https://generativelanguage.googleapis.com/v1beta/openai` | `GOOGLE_API_KEY` | Google Gemini API |
-| nova | `http://token.njunova.com:8317/v1` | `NOVA_API_KEY` | NJU 校内服务 |
-| vectorengine | `https://api.vectorengine.ai/v1` | `VECTORENGINE_API_KEY` | 第三方 API 中转站 |
+| deepseek | `https://api.deepseek.com/v1` | `DEEPSEEK_API_KEY` | DeepSeek 官方 API |
 
-> 上表仅为示例。请根据自身可用的 API 来源，在 `settings.yaml` 中添加或修改 Provider 配置。
+> 上表仅为示例，`config/settings.yaml` 默认使用 siliconflow 路由；请替换为自己实际可用的 Provider。
+> 升级提示：默认配置只保留这三个公开示例，此前自定义的 Provider 需在配置页重新添加，或从 git 历史恢复。
 
 **添加新 Provider 示例：**
 
@@ -359,7 +401,7 @@ tests/                   # pytest 测试（testpaths 已限定在此目录）
 ## 测试
 
 ```bash
-# Python 单元测试（89 passed，核心逻辑 + 代理安全 + 任务桥接 + 回归）
+# Python 单元测试（核心逻辑 + 代理安全 + 任务桥接 + 配置持久化 + 回归）
 python -m pytest tests -q
 
 # SDK 单元测试（167 个用例，vitest）

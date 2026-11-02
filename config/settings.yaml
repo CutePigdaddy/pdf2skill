@@ -3,37 +3,41 @@ llm:
   max_retries: 3
   timeout: 300
   providers:
-    nova:
-      base_url: http://token.njunova.com:8317/v1
-      api_key_env: NOVA_API_KEY
-      chunking_model: Kimi-K2.5
-      peeling_model: MiniMax-M2.5
-      skill_engine_model: MiniMax-M2.5
+    siliconflow:
+      base_url: https://api.siliconflow.cn/v1
+      api_key_env: SILICONFLOW_API_KEY
+      chunking_model: deepseek-ai/DeepSeek-R1
+      peeling_model: deepseek-ai/DeepSeek-V3
+      skill_engine_model: deepseek-ai/DeepSeek-V3
       chunking_reasoning_effort: ''
       peeling_reasoning_effort: ''
       skill_engine_reasoning_effort: ''
-    qoder:
-      base_url: https://sg.pigdaddy.xyz/v1
-      api_key_env: QODER_API_KEY
-      chunking_model: Qwen3.8-Max
-      peeling_model: DeepSeek-Flash
-      skill_engine_model: DeepSeek-Flash
+    google:
+      base_url: https://generativelanguage.googleapis.com/v1beta/openai
+      api_key_env: GOOGLE_API_KEY
+      chunking_model: gemini-3-flash-preview
+      peeling_model: gemini-3.1-flash-lite-preview
+      skill_engine_model: gemini-3.1-flash-lite-preview
       chunking_reasoning_effort: ''
       peeling_reasoning_effort: ''
       skill_engine_reasoning_effort: ''
     deepseek:
       base_url: https://api.deepseek.com/v1
       api_key_env: DEEPSEEK_API_KEY
-      chunking_model: deepseek-flash
-      peeling_model: deepseek-flash
-      skill_engine_model: deepseek-flash
+      chunking_model: deepseek-chat
+      peeling_model: deepseek-chat
+      skill_engine_model: deepseek-chat
       chunking_reasoning_effort: ''
       peeling_reasoning_effort: ''
       skill_engine_reasoning_effort: ''
+  # Web UI keys and CLI fallback keys are kept in sync.
   routers:
-    chunking: qoder
-    peeling: nova
-    skillEngine: nova
+    chunking: siliconflow
+    peeling: siliconflow
+    skillEngine: siliconflow
+    chunking_provider: siliconflow
+    peeling_provider: siliconflow
+    skill_engine_provider: siliconflow
 mineru:
   api_mode: remote
   language: ch

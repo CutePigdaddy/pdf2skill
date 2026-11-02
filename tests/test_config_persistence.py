@@ -18,14 +18,14 @@ from frontend import proxy_server as proxy
 BASE_SETTINGS = {
     "llm": {
         "providers": {
-            "nova": {
+            "siliconflow": {
                 "base_url": "https://api.example.com/v1",
-                "api_key_env": "NOVA_API_KEY",
+                "api_key_env": "SILICONFLOW_API_KEY",
                 "chunking_model": "old-model",
                 "chunking_reasoning_effort": "",
             },
         },
-        "routers": {"chunking": "nova", "peeling": "nova", "skillEngine": "nova"},
+        "routers": {"chunking": "siliconflow", "peeling": "siliconflow", "skillEngine": "siliconflow"},
     },
     "mineru": {
         "api_mode": "remote",
@@ -174,9 +174,9 @@ def test_config_persists_all_sections(client, files):
     settings, _ = files
     payload = {
         "providers": {
-            "nova": {
+            "siliconflow": {
                 "base_url": "https://api.example.com/v2",
-                "api_key_env": "NOVA_API_KEY",
+                "api_key_env": "SILICONFLOW_API_KEY",
                 "chunking_model": "new-model",
                 "chunking_reasoning_effort": "high",
             },
@@ -186,7 +186,7 @@ def test_config_persists_all_sections(client, files):
                 "peeling_model": "peel",
             },
         },
-        "routers": {"chunking": "local", "peeling": "nova", "skillEngine": "nova"},
+        "routers": {"chunking": "local", "peeling": "siliconflow", "skillEngine": "siliconflow"},
         "pdf": {
             "request_interval": 0.5,
             "page_limit": 120,
@@ -217,8 +217,8 @@ def test_config_persists_all_sections(client, files):
     assert resp.status_code == 200, resp.text
 
     data = yaml.safe_load(settings.read_text(encoding="utf-8"))
-    assert data["llm"]["providers"]["nova"]["chunking_model"] == "new-model"
-    assert data["llm"]["providers"]["nova"]["chunking_reasoning_effort"] == "high"
+    assert data["llm"]["providers"]["siliconflow"]["chunking_model"] == "new-model"
+    assert data["llm"]["providers"]["siliconflow"]["chunking_reasoning_effort"] == "high"
     assert data["llm"]["providers"]["local"]["peeling_model"] == "peel"
     assert data["llm"]["routers"] == payload["routers"]
     assert data["pdf"] == payload["pdf"]
@@ -230,7 +230,7 @@ def test_config_persists_all_sections(client, files):
 
     got = client.get("/api/config").json()
     assert got["ok"] is True
-    assert got["providers"]["nova"]["chunking_model"] == "new-model"
+    assert got["providers"]["siliconflow"]["chunking_model"] == "new-model"
     assert got["routers"] == payload["routers"]
     assert got["pdf"] == payload["pdf"]
     assert got["mineru"]["local"]["backend"] == "pipeline"
@@ -244,9 +244,9 @@ def test_config_validation_failure_writes_nothing(client, files):
         "/api/config",
         json={
             "providers": {
-                "nova": {
+                "siliconflow": {
                     "base_url": "https://api.example.com/v1",
-                    "api_key_env": "NOVA_API_KEY",
+                    "api_key_env": "SILICONFLOW_API_KEY",
                 }
             },
             "pdf": {"page_limit": 0},
@@ -289,12 +289,12 @@ def test_config_keeps_cli_router_aliases_in_sync(client, files):
 
     resp = client.post(
         "/api/config",
-        json={"routers": {"chunking": "nova", "peeling": "nova", "skillEngine": "nova"}},
+        json={"routers": {"chunking": "siliconflow", "peeling": "siliconflow", "skillEngine": "siliconflow"}},
     )
 
     assert resp.status_code == 200
     routers = yaml.safe_load(settings.read_text(encoding="utf-8"))["llm"]["routers"]
-    assert routers["chunking_provider"] == "nova"
+    assert routers["chunking_provider"] == "siliconflow"
 
 
 def test_config_deletes_providers(client, files):
@@ -306,7 +306,7 @@ def test_config_deletes_providers(client, files):
                 "api_key_env": "LOCAL_API_KEY",
             }
         },
-        "delete_providers": ["nova"],
+        "delete_providers": ["siliconflow"],
         "routers": {"chunking": "local", "peeling": "local", "skillEngine": "local"},
     }
 
@@ -314,7 +314,7 @@ def test_config_deletes_providers(client, files):
 
     assert resp.status_code == 200, resp.text
     data = yaml.safe_load(settings.read_text(encoding="utf-8"))
-    assert "nova" not in data["llm"]["providers"]
+    assert "siliconflow" not in data["llm"]["providers"]
     assert "local" in data["llm"]["providers"]
 
 
@@ -322,7 +322,7 @@ def test_config_rejects_unknown_router_stage(client, files):
     settings, _ = files
     before = settings.read_text(encoding="utf-8")
 
-    resp = client.post("/api/config", json={"routers": {"unknownStage": "nova"}})
+    resp = client.post("/api/config", json={"routers": {"unknownStage": "siliconflow"}})
 
     assert resp.status_code == 422
     assert resp.json()["detail"]["error"]["code"] == "INVALID_ROUTERS"
@@ -336,15 +336,15 @@ def test_legacy_providers_endpoint_still_writes(client, files):
         "/api/providers",
         json={
             "providers": {
-                "nova": {
+                "siliconflow": {
                     "base_url": "https://api.example.com/v3",
-                    "api_key_env": "NOVA_API_KEY",
+                    "api_key_env": "SILICONFLOW_API_KEY",
                 }
             },
-            "routers": {"chunking": "nova", "peeling": "nova", "skillEngine": "nova"},
+            "routers": {"chunking": "siliconflow", "peeling": "siliconflow", "skillEngine": "siliconflow"},
         },
     )
 
     assert resp.status_code == 200
     data = yaml.safe_load(settings.read_text(encoding="utf-8"))
-    assert data["llm"]["providers"]["nova"]["base_url"] == "https://api.example.com/v3"
+    assert data["llm"]["providers"]["siliconflow"]["base_url"] == "https://api.example.com/v3"
