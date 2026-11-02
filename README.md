@@ -94,7 +94,9 @@ python frontend/server.py
 # 浏览器访问 http://localhost:8501
 ```
 
-`server.py` 同时托管构建后的新版工作台与 `/api/*` 代理（LLM / MinerU 转发），API Key 只保存在服务端进程内。前端开发时改用下文的 Vite 开发模式。
+`server.py` 同时托管构建后的新版工作台与 `/api/*` 代理（LLM / MinerU 转发）。API Key 只保存在服务端：在「配置」面板设置后会写入项目根目录 `.env` 并立即生效，重启后仍保留；Key 不会进入浏览器。前端开发时改用下文的 Vite 开发模式。
+
+「配置」面板的 Provider、模型、思考强度、PDF 与 MinerU 参数会先保存到浏览器 localStorage，点「保存配置」时再同步写入 `config/settings.yaml`；「从服务端导入」可把服务端配置完整恢复到当前浏览器。各参数也可继续直接编辑这两个文件。
 
 新版工作台的「运行」页可直接选择当前浏览器 OPFS 中已完成 Stage 1 的任务继续，无需重新上传原文件；「输出」页也提供「继续任务」入口。浏览器任务按 origin 隔离（`127.0.0.1:8501`、`localhost:8501`、`5173` 各自独立）。
 

@@ -62,7 +62,7 @@
       <div class="step-title">准备 API Key</div>
       <div class="step-text">
         <ul>
-          <li>在「配置」面板的 <strong>API Keys</strong> 区为每个 Provider 填入 Key（只保存在代理后端进程内，永不进入浏览器）；或在项目根目录 <code>.env</code> 中配置后重启代理。</li>
+          <li>在「配置」面板的 <strong>API Keys</strong> 区为每个 Provider 填入 Key（写入服务端项目根目录 <code>.env</code>，立即生效并在重启后保留；Key 不会进入浏览器）。也可直接编辑 <code>.env</code> 后重启代理。</li>
           <li>MinerU 远程模式需要 <code>MINERU_API_KEY</code>；本地模式需要先在本地启动 MinerU 服务。</li>
         </ul>
       </div>
@@ -77,8 +77,8 @@
       <div class="step-text">
         <ul>
           <li>在「阶段配置」中为 Chunking / Peeling / Skill Engine 三个阶段分别选择 Provider。</li>
-          <li>在「Provider 管理」中维护每个 Provider 的 <code>base_url</code>、API Key 环境变量名、三个阶段模型及思考强度；可一键从服务端 <code>settings.yaml</code> 导入。</li>
-          <li>点「获取模型列表」拉取该 Provider 可用模型（需先把 Provider 同步到服务端）。</li>
+          <li>在「Provider 管理」中维护每个 Provider 的 <code>base_url</code>、API Key 环境变量名、三个阶段模型及思考强度；点「保存配置」会写入服务端 <code>settings.yaml</code>，也可一键从服务端导入。</li>
+          <li>点「获取模型列表」拉取该 Provider 可用模型（需先把 Provider 保存到服务端）。</li>
         </ul>
       </div>
       <div class="step-goto"><button class="btn btn-secondary btn-sm" data-goto="config" data-anchor="stage-cards">前往配置 Provider<i class="ph ph-arrow-right"></i></button></div>
@@ -132,11 +132,10 @@
   <div class="page-head">
     <div>
       <h2>Provider 配置</h2>
-      <p class="subtitle">为每个阶段选择 Provider；Provider 的地址与模型在「Provider 管理」中维护（保存在浏览器 localStorage）。API Key 只存放在代理后端。</p>
+      <p class="subtitle">为每个阶段选择 Provider；地址、模型与参数保存在浏览器 localStorage，点「保存配置」时同步写入服务端 <code>config/settings.yaml</code>。API Key 写入服务端 <code>.env</code>，不会进入浏览器。</p>
     </div>
     <div class="page-actions">
       <button class="btn btn-secondary btn-sm" id="btn-import-providers"><i class="ph ph-download-simple"></i>从服务端导入</button>
-      <button class="btn btn-ghost btn-sm" id="btn-sync-providers" title="把当前 Provider 注册表写回服务端 settings.yaml（模型列表获取等服务端功能依赖它）"><i class="ph ph-upload-simple"></i>同步到服务端</button>
     </div>
   </div>
 
@@ -239,7 +238,7 @@
   <div class="section-divider">
     <span class="section-label">API Keys</span>
   </div>
-  <p class="subtitle" style="margin-top:0">在此设置 Key 仅保存在代理后端进程内；写入 <code>.env</code> 可持久化（需重启代理）。Key 不会进入浏览器。</p>
+  <p class="subtitle" style="margin-top:0">在此设置 Key 会写入服务端项目根目录 <code>.env</code> 并立即生效，重启代理后仍保留。Key 不会进入浏览器。</p>
   <div class="card" id="apikey-section"></div>
 
   <!-- ── MinerU config ────────────────────────────────────────── -->

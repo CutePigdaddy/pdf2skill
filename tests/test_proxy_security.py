@@ -9,6 +9,7 @@ import os
 import pytest
 from fastapi.testclient import TestClient
 
+from frontend import proxy_server
 from frontend.proxy_server import app
 
 
@@ -17,6 +18,14 @@ def client():
     # Host header must match the allowlist exactly — the same guarantee the
     # browser-side defenses rely on.
     return TestClient(app, base_url="http://127.0.0.1:8502")
+
+
+@pytest.fixture
+def temp_env(tmp_path, monkeypatch):
+    """Keep successful /api/keys writes out of the real project .env."""
+    monkeypatch.setattr(proxy_server, "ENV_PATH", tmp_path / ".env")
+    yield
+    os.environ.pop("PROXYTEST_API_KEY", None)
 
 
 class TestHostAllowlist:
@@ -47,7 +56,7 @@ class TestOriginCheck:
         assert resp.status_code == 403
         assert resp.json()["error"]["code"] == "FORBIDDEN_ORIGIN"
 
-    def test_allowlisted_origin_passes_middleware(self, client):
+    def test_allowlisted_origin_passes_middleware(self, client, temp_env):
         # Middleware passes (origin allowlisted); the endpoint itself may
         # still 4xx/200 — we only assert the origin gate didn't fire.
         resp = client.post(
@@ -56,7 +65,6 @@ class TestOriginCheck:
             headers={"Origin": "http://localhost:5173"},
         )
         assert resp.status_code != 403
-        os.environ.pop("PROXYTEST_API_KEY", None)
 
 
 class TestSetKeyRestriction:
@@ -67,13 +75,12 @@ class TestSetKeyRestriction:
             # HTTPException wraps the envelope under "detail"
             assert resp.json()["detail"]["error"]["code"] == "FORBIDDEN_ENV_VAR"
 
-    def test_accepts_api_key_suffix(self, client):
+    def test_accepts_api_key_suffix(self, client, temp_env):
         resp = client.post(
             "/api/keys", json={"env_var": "PROXYTEST_API_KEY", "value": "abc"}
         )
         assert resp.status_code == 200
         assert os.environ.get("PROXYTEST_API_KEY") == "abc"
-        os.environ.pop("PROXYTEST_API_KEY", None)
 
     def test_rejects_malformed_name(self, client):
         resp = client.post("/api/keys", json={"env_var": "BAD NAME", "value": "x"})

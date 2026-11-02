@@ -1,6 +1,11 @@
 import { Pdf2Skill, validateConfig } from '@pdf2skill/sdk';
-import type { ProviderConfig } from '@pdf2skill/sdk';
-import { fetchModels, getKeys, getProviders, setKey, syncProviders } from '../api/backend';
+import type {
+  MineruConfig,
+  PdfConfig,
+  ProviderConfig,
+  RoutersConfig,
+} from '@pdf2skill/sdk';
+import { fetchModels, getKeys, getServerConfig, saveServerConfig, setKey } from '../api/backend';
 import { enhanceModelInputs } from '../ui/combobox';
 import { $, checked, escapeHtml, errInfoOf, setChecked, setVal, showToast, val } from '../ui/dom';
 import { enhanceSelects, syncSelect } from '../ui/dropdown';
@@ -56,6 +61,7 @@ function effortOptionsHtml(current: string): string {
 
 let mineruMode: 'local' | 'remote' = 'local';
 const modelCache = new Map<string, string[]>();
+const pendingDeletes = new Set<string>();
 let keyStatus: Record<string, { api_key_env: string; api_key_set: boolean; api_key_preview: string }> = {};
 
 let pdf2skill: Pdf2Skill;
@@ -256,10 +262,11 @@ async function saveNewProvider(): Promise<void> {
 
   const cfg = sdk().getConfig();
   cfg.providers[name] = candidate;
+  pendingDeletes.delete(name);
   sdk().configure({ providers: cfg.providers });
   hideAddProviderForm();
   await loadConfigUI();
-  showToast('Provider 已保存（记得点「保存配置」或「同步到服务端」）');
+  showToast('Provider 已添加（点「保存配置」写入服务端）');
 }
 
 async function deleteProvider(name: string): Promise<void> {
@@ -282,9 +289,10 @@ async function deleteProvider(name: string): Promise<void> {
     }
   }
   delete cfg.providers[name];
+  pendingDeletes.add(name);
   sdk().configure({ providers: cfg.providers });
   await loadConfigUI();
-  showToast(`已删除 Provider ${name}`);
+  showToast(`已删除 Provider ${name}（点「保存配置」写入服务端）`);
 }
 
 // ── MinerU mode ───────────────────────────────────────────────────
@@ -392,7 +400,7 @@ async function applySetKey(envVar: string, input: HTMLInputElement): Promise<voi
     await setKey(envVar, input.value);
     input.value = '';
     modelCache.clear();
-    showToast('Key 已设置');
+    showToast('Key 已写入 .env 并生效');
     await loadKeyStatus();
   } catch (e) {
     showSaveError(e);
@@ -420,8 +428,7 @@ function toProviderConfig(fields: Record<string, string>): ProviderConfig {
     api_key_env: fields.api_key_env || '',
   };
   for (const k of [...MODEL_KEYS, ...REASONING_KEYS]) {
-    const v = fields[k];
-    if (v) cfg[k] = v;
+    if (k in fields) cfg[k] = fields[k];
   }
   return cfg;
 }
@@ -432,28 +439,30 @@ function toProviderConfigMap(all: Record<string, Record<string, string>>): Recor
   return out;
 }
 
-export async function saveConfigUI(): Promise<boolean> {
-  hideSaveError();
-
-  const providers = gatherProvidersFromUI();
-
-  const routers = {
+function gatherRouters(): RoutersConfig {
+  return {
     chunking: (document.getElementById('chunk-provider') as HTMLSelectElement).value,
     peeling: (document.getElementById('peel-provider') as HTMLSelectElement).value,
     skillEngine: (document.getElementById('skill-provider') as HTMLSelectElement).value,
   };
+}
 
-  const pdf = {
+function gatherPdf(base: PdfConfig): PdfConfig {
+  return {
+    ...base,
     request_interval: parseFloat(val('request-interval')) || 0.3,
     page_limit: parseInt(val('pdf-page-limit'), 10) || 200,
     chunk_merge_threshold: parseInt(val('pdf-merge-threshold'), 10) || 5000,
     chunk_min_threshold: parseInt(val('pdf-min-threshold'), 10) || 1000,
   };
+}
 
-  const mineru = {
+function gatherMineru(base: MineruConfig): MineruConfig {
+  return {
     api_mode: mineruMode,
     language: mineruMode === 'local' ? val('mu-language') : val('mu-language-remote'),
     local: {
+      ...base.local,
       base_url: val('mu-local-url'),
       backend: val('mu-local-backend'),
       parse_method: val('mu-local-parse'),
@@ -461,20 +470,29 @@ export async function saveConfigUI(): Promise<boolean> {
       table_enable: checked('mu-local-table'),
     },
     remote: {
+      ...base.remote,
       model_version: val('mu-remote-model'),
       page_ranges: val('mu-remote-pages'),
       is_ocr: checked('mu-remote-ocr'),
       enable_formula: checked('mu-remote-formula'),
       enable_table: checked('mu-remote-table'),
-      extra_formats: [],
     },
   };
+}
+
+export async function saveConfigUI(): Promise<boolean> {
+  hideSaveError();
 
   const cfg = sdk().getConfig();
-  cfg.providers = toProviderConfigMap(providers);
+  const providers = toProviderConfigMap(gatherProvidersFromUI());
+  const routers = gatherRouters();
+  const pdf = gatherPdf(cfg.pdf);
+  const mineru = gatherMineru(cfg.mineru);
+
+  cfg.providers = providers;
   cfg.routers = routers;
-  Object.assign(cfg.pdf, pdf);
-  Object.assign(cfg.mineru, mineru);
+  cfg.pdf = pdf;
+  cfg.mineru = mineru;
 
   const issues = validateConfig(cfg);
   if (issues.length > 0) {
@@ -482,49 +500,66 @@ export async function saveConfigUI(): Promise<boolean> {
     return false;
   }
 
+  // Browser-local persistence stays available when the proxy is offline;
+  // server persistence is attempted on every save.
   sdk().configure(cfg);
-  showToast('配置已保存（浏览器本地）');
+  try {
+    const deletes = [...pendingDeletes].filter((name) => !(name in providers));
+    await saveServerConfig(providers, routers, pdf, mineru, deletes);
+    deletes.forEach((name) => pendingDeletes.delete(name));
+    showToast('配置已保存（浏览器 + 服务端）');
+  } catch (e) {
+    const info = errInfoOf(e);
+    showToast(`已保存到浏览器；服务端写入失败：${info.message}`, 'error');
+  }
   await loadConfigUI();
   return true;
+}
+
+function routersFromServer(routers: Record<string, string>): RoutersConfig {
+  return {
+    chunking: routers?.chunking || routers?.chunking_provider || '',
+    peeling: routers?.peeling || routers?.peeling_provider || '',
+    skillEngine: routers?.skillEngine || routers?.skill_engine_provider || '',
+  };
+}
+
+/** Fresh browser/origin: adopt the server config instead of showing defaults. */
+export async function hydrateConfigFromServer(): Promise<void> {
+  if (Object.keys(sdk().getConfig().providers).length > 0) return;
+  try {
+    const data = await getServerConfig();
+    if (!data.ok || !data.providers || Object.keys(data.providers).length === 0) return;
+    sdk().configure({
+      providers: data.providers,
+      routers: routersFromServer(data.routers),
+      pdf: data.pdf,
+      mineru: data.mineru,
+    });
+  } catch {
+    // Proxy offline: keep local defaults; the import button retries later.
+  }
 }
 
 async function importFromServer(): Promise<void> {
   hideSaveError();
   try {
-    const data = await getProviders();
+    const data = await getServerConfig();
     if (!data.ok || !data.providers || Object.keys(data.providers).length === 0) {
       showSaveError({
         errInfo: { code: 'NO_PROVIDER', message: '服务端 settings.yaml 中没有 Provider', advice: '请先在服务端配置 llm.providers' },
       });
       return;
     }
-    const routers = {
-      chunking: data.routers?.chunking_provider || data.routers?.chunking || '',
-      peeling: data.routers?.peeling_provider || data.routers?.peeling || '',
-      skillEngine: data.routers?.skill_engine_provider || data.routers?.skillEngine || '',
-    };
     sdk().configure({
-      providers: toProviderConfigMap(data.providers),
-      routers,
+      providers: data.providers,
+      routers: routersFromServer(data.routers),
+      pdf: data.pdf,
+      mineru: data.mineru,
     });
+    pendingDeletes.clear();
     await loadConfigUI();
-    showToast(`已导入 ${Object.keys(data.providers).length} 个 Provider`);
-  } catch (e) {
-    showSaveError(e);
-  }
-}
-
-async function syncToServer(): Promise<void> {
-  hideSaveError();
-  const providers = gatherProvidersFromUI();
-  const routers = {
-    chunking: (document.getElementById('chunk-provider') as HTMLSelectElement).value,
-    peeling: (document.getElementById('peel-provider') as HTMLSelectElement).value,
-    skillEngine: (document.getElementById('skill-provider') as HTMLSelectElement).value,
-  };
-  try {
-    await syncProviders(providers, routers);
-    showToast('已同步到服务端 settings.yaml');
+    showToast(`已从服务端导入 ${Object.keys(data.providers).length} 个 Provider 与全部参数`);
   } catch (e) {
     showSaveError(e);
   }
@@ -543,7 +578,6 @@ export function setupConfigTab(sdkInstance: Pdf2Skill): void {
   $('btn-save-new-provider').addEventListener('click', () => void saveNewProvider());
   $('btn-save-config').addEventListener('click', () => void saveConfigUI());
   $('btn-import-providers').addEventListener('click', () => void importFromServer());
-  $('btn-sync-providers').addEventListener('click', () => void syncToServer());
   $('mode-local').addEventListener('click', () => setMinerUMode('local'));
   $('mode-remote').addEventListener('click', () => setMinerUMode('remote'));
   $('btn-set-mu-key').addEventListener('click', () => {

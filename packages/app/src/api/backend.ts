@@ -1,3 +1,9 @@
+import type {
+  MineruConfig,
+  PdfConfig,
+  ProviderConfig,
+  RoutersConfig,
+} from '@pdf2skill/sdk';
 import type { ErrorInfo } from '../ui/dom';
 
 /** Thin proxy backend client (LLM keys / models / providers / health). */
@@ -69,23 +75,34 @@ export function setKey(envVar: string, value: string): Promise<{ ok: boolean }> 
   return api('/api/keys', { method: 'POST', body: JSON.stringify({ env_var: envVar, value }) });
 }
 
-export interface ProvidersResult {
+export interface ServerConfigResult {
   ok: boolean;
-  providers: Record<string, Record<string, string>>;
+  providers: Record<string, ProviderConfig>;
+  /** Web keys (chunking/…) plus any CLI-only *_provider aliases. */
   routers: Record<string, string>;
-  llm: Record<string, unknown>;
+  pdf: PdfConfig;
+  mineru: MineruConfig;
 }
 
-export function getProviders(): Promise<ProvidersResult> {
-  return api<ProvidersResult>('/api/providers');
+export function getServerConfig(): Promise<ServerConfigResult> {
+  return api<ServerConfigResult>('/api/config');
 }
 
-export function syncProviders(
-  providers: Record<string, Record<string, string>>,
-  routers: Record<string, string>,
+export function saveServerConfig(
+  providers: Record<string, ProviderConfig>,
+  routers: RoutersConfig,
+  pdf: PdfConfig,
+  mineru: MineruConfig,
+  deleteProviders: string[] = [],
 ): Promise<{ ok: boolean }> {
-  return api('/api/providers', {
+  return api('/api/config', {
     method: 'POST',
-    body: JSON.stringify({ providers, routers }),
+    body: JSON.stringify({
+      providers,
+      routers,
+      pdf,
+      mineru,
+      delete_providers: deleteProviders,
+    }),
   });
 }

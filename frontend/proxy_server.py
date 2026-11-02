@@ -8,9 +8,11 @@ secrets and forwards traffic:
                                   provider (API key resolved server-side from .env)
   - GET  /api/models              list models for a provider
   - GET  /api/keys                masked API-key status (LLM providers + MinerU)
-  - POST /api/keys                set an API key in process memory
+  - POST /api/keys                set an API key in .env and process memory
   - GET  /api/providers           provider registry from settings.yaml
   - POST /api/providers           add/update/delete providers in settings.yaml
+  - GET  /api/config              full web-facing config from settings.yaml
+  - POST /api/config              persist providers/routers/pdf/mineru
   - POST /api/mineru/file-urls/batch       MinerU signed-upload URL (remote)
   - PUT  /api/mineru/upload?url=           PUT PDF bytes to the signed URL
   - GET  /api/mineru/extract-results/batch/{batch_id}   poll MinerU batch results
@@ -46,6 +48,7 @@ load_dotenv(Path(__file__).parent.parent / ".env")
 
 PROJECT_ROOT = Path(__file__).parent.parent
 SETTINGS_PATH = PROJECT_ROOT / "config" / "settings.yaml"
+ENV_PATH = PROJECT_ROOT / ".env"
 MINERU_BASE_URL = "https://mineru.net/api/v4"
 
 PROVIDER_NAME_RE = re.compile(r"^[a-z0-9][a-z0-9_-]*$")
@@ -222,6 +225,116 @@ def _save_settings(data: dict):
 
 def _err_payload(code: str, message: str, advice: str) -> dict:
     return {"ok": False, "error": {"code": code, "message": message, "advice": advice}}
+
+
+def _config_error(code: str, message: str, advice: str) -> HTTPException:
+    return HTTPException(422, detail=_err_payload(code, message, advice))
+
+
+def _write_env_value(env_var: str, value: str) -> None:
+    """Persist one key in .env, preserving comments and unrelated lines.
+
+    Values are double-quoted. python-dotenv always expands ``${...}`` on load
+    (even inside quotes), so such values cannot round-trip and are rejected.
+    """
+    if any(ch in value for ch in ("\r", "\n", "\x00")):
+        raise _config_error(
+            "INVALID_KEY_VALUE",
+            "API Key 不能包含换行或空字符",
+            "请检查是否误粘贴了多行内容",
+        )
+    if "${" in value:
+        raise _config_error(
+            "INVALID_KEY_VALUE",
+            "API Key 不能包含 ${...} 片段",
+            ".env 会把它当作变量展开，请确认复制的内容正确",
+        )
+
+    escaped = value.replace("\\", "\\\\").replace('"', '\\"')
+    assignment = f'{env_var}="{escaped}"'
+    try:
+        original = (
+            ENV_PATH.read_text(encoding="utf-8-sig") if ENV_PATH.exists() else ""
+        )
+    except OSError as e:
+        raise HTTPException(500, detail=_err_payload(
+            "ENV_READ_FAILED", f"无法读取 .env: {e}",
+            "请检查项目根目录 .env 的读取权限"))
+
+    lines = original.splitlines()
+    if not lines:
+        lines = ["# pdf2skill configuration"]
+    assignment_re = re.compile(rf"^\s*(?:export\s+)?{re.escape(env_var)}\s*=")
+    found = False
+    for i, line in enumerate(lines):
+        if assignment_re.match(line):
+            lines[i] = assignment
+            found = True
+    if not found:
+        if lines[-1].strip():
+            lines.append("")
+        lines.append(assignment)
+    new_text = "\n".join(lines) + "\n"
+
+    tmp_name: Optional[str] = None
+    try:
+        fd, tmp_name = tempfile.mkstemp(prefix=".env-", dir=str(ENV_PATH.parent))
+        with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as f:
+            f.write(new_text)
+        os.replace(tmp_name, ENV_PATH)
+        tmp_name = None
+        try:
+            os.chmod(ENV_PATH, 0o600)
+        except OSError:
+            pass
+    except OSError as e:
+        if tmp_name:
+            try:
+                os.unlink(tmp_name)
+            except OSError:
+                pass
+        raise HTTPException(500, detail=_err_payload(
+            "ENV_WRITE_FAILED", f"无法写入 .env: {e}",
+            "请检查项目根目录的写入权限或磁盘空间"))
+
+
+def _require_str(
+    value, field: str, *, max_len: int = 128, pattern: Optional[str] = None
+) -> str:
+    if not isinstance(value, str):
+        raise _config_error("INVALID_CONFIG", f"{field} 必须是字符串", "请检查配置输入")
+    value = value.strip()
+    if not value:
+        raise _config_error("INVALID_CONFIG", f"{field} 不能为空", "请检查配置输入")
+    if len(value) > max_len:
+        raise _config_error(
+            "INVALID_CONFIG", f"{field} 过长（上限 {max_len} 字符）", "请检查配置输入")
+    if pattern and not re.match(pattern, value):
+        raise _config_error("INVALID_CONFIG", f"{field} 格式不合法", "请检查配置输入")
+    return value
+
+
+def _require_bool(value, field: str) -> bool:
+    if not isinstance(value, bool):
+        raise _config_error("INVALID_CONFIG", f"{field} 必须是布尔值", "请检查配置输入")
+    return value
+
+
+def _require_number(
+    value, field: str, *, minimum: float, maximum: float, integer: bool
+):
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise _config_error("INVALID_PDF_CONFIG", f"{field} 必须是数字", "请检查 PDF 配置")
+    if integer and int(value) != value:
+        raise _config_error("INVALID_PDF_CONFIG", f"{field} 必须是整数", "请检查 PDF 配置")
+    number = int(value) if integer else float(value)
+    if not (minimum <= number <= maximum):
+        raise _config_error(
+            "INVALID_PDF_CONFIG",
+            f"{field} 超出范围（{minimum} ~ {maximum}）",
+            "请检查 PDF 配置",
+        )
+    return number
 
 
 # ── provider/key resolution (mirrors utils/llm_client.py) ───────────
@@ -473,8 +586,9 @@ def set_key(body: dict):
         raise HTTPException(422, detail=_err_payload(
             "FORBIDDEN_ENV_VAR", f"拒绝写入环境变量 '{env_var}'",
             "只允许写入 *_API_KEY 形式的密钥变量，或 settings.yaml 中注册的 api_key_env"))
+    _write_env_value(env_var, value)
     os.environ[env_var] = value
-    return {"ok": True}
+    return {"ok": True, "persisted": True}
 
 
 # ── provider registry (settings.yaml llm section) ───────────────────
@@ -488,20 +602,20 @@ def get_providers():
                     if k not in ("providers", "routers")}}
 
 
-@app.post("/api/providers")
-def update_providers(body: dict):
-    """Add/update/delete providers in settings.yaml (llm.providers only).
-
-    Validation matches server.py's /api/config rules: provider name pattern,
-    base_url scheme, api_key_env pattern, router-reference delete block,
-    last-provider delete block. All validated before writing.
-    """
-    current = _load_settings()
-    providers = current.setdefault("llm", {}).setdefault("providers", {})
-    routers = current["llm"].setdefault("routers", {})
+def _apply_provider_updates(current: dict, body: dict) -> None:
+    """Validate and apply provider/router edits to ``current`` in memory."""
+    llm = current.setdefault("llm", {})
+    providers = llm.setdefault("providers", {})
+    routers = llm.setdefault("routers", {})
 
     if "providers" in body:
-        for name, cfg in body["providers"].items():
+        updates = body["providers"]
+        if not isinstance(updates, dict):
+            raise _config_error("INVALID_PROVIDERS", "providers 必须是对象", "请检查配置输入")
+        for name, cfg in updates.items():
+            if not isinstance(cfg, dict):
+                raise _config_error(
+                    "INVALID_PROVIDERS", f"Provider '{name}' 的配置必须是对象", "请检查配置输入")
             if not PROVIDER_NAME_RE.match(name):
                 raise HTTPException(422, detail=_err_payload(
                     "INVALID_PROVIDER_NAME", f"Provider 名称 '{name}' 不合法",
@@ -540,6 +654,34 @@ def update_providers(body: dict):
                             "环境变量名只能包含字母、数字、下划线，且以字母或下划线开头"))
                 providers[name][k] = v
 
+    if "routers" in body:
+        if not isinstance(body["routers"], dict):
+            raise _config_error("INVALID_ROUTERS", "routers 必须是对象", "请检查配置输入")
+        for stage, name in body["routers"].items():
+            if stage not in ("chunking", "peeling", "skillEngine"):
+                raise _config_error(
+                    "INVALID_ROUTERS", f"未知的阶段 '{stage}'",
+                    "阶段只能是 chunking / peeling / skillEngine")
+            if name and name not in providers:
+                raise HTTPException(422, detail=_err_payload(
+                    "ROUTER_UNKNOWN_PROVIDER", f"阶段 {stage} 引用了不存在的 Provider '{name}'",
+                    "请选择配置中已有的 Provider"))
+        # Merge the three web stages so CLI-only aliases (_provider keys)
+        # already present in settings.yaml survive a web save; keep those
+        # aliases in sync when they exist.
+        alias_map = {
+            "chunking": "chunking_provider",
+            "peeling": "peeling_provider",
+            "skillEngine": "skill_engine_provider",
+        }
+        for stage, name in body["routers"].items():
+            routers[stage] = name
+            alias = alias_map[stage]
+            if alias in routers:
+                routers[alias] = name
+
+    # Routers are applied first so a single save can switch stages away from
+    # a provider and delete it in the same request.
     if "delete_providers" in body:
         for name in body["delete_providers"]:
             if name not in providers:
@@ -555,14 +697,146 @@ def update_providers(body: dict):
                     "LAST_PROVIDER", f"无法删除最后一个 Provider '{name}'", "至少保留一个 Provider"))
             del providers[name]
 
-    if "routers" in body:
-        for stage, name in body["routers"].items():
-            if name and name not in providers:
-                raise HTTPException(422, detail=_err_payload(
-                    "ROUTER_UNKNOWN_PROVIDER", f"阶段 {stage} 引用了不存在的 Provider '{name}'",
-                    "请选择配置中已有的 Provider"))
-        current["llm"]["routers"] = body["routers"]
 
+@app.post("/api/providers")
+def update_providers(body: dict):
+    """Add/update/delete providers in settings.yaml (llm.providers only).
+
+    Validation matches server.py's /api/config rules: provider name pattern,
+    base_url scheme, api_key_env pattern, router-reference delete block,
+    last-provider delete block. All validated before writing.
+    """
+    current = _load_settings()
+    _apply_provider_updates(current, body)
+    _save_settings(current)
+    return {"ok": True}
+
+
+# ── full web config (settings.yaml pdf/mineru sections) ─────────────
+
+_PDF_LIMITS = {
+    "page_limit": (1, 100_000, True),
+    "request_interval": (0.0, 3600.0, False),
+    "chunk_merge_threshold": (1, 10_000_000, True),
+    "chunk_min_threshold": (1, 10_000_000, True),
+}
+
+
+def _apply_pdf_config(current: dict, payload) -> None:
+    if not isinstance(payload, dict):
+        raise _config_error("INVALID_PDF_CONFIG", "pdf 必须是对象", "请检查 PDF 配置")
+    pdf = current.setdefault("pdf", {})
+    for key, (minimum, maximum, integer) in _PDF_LIMITS.items():
+        if key in payload:
+            pdf[key] = _require_number(
+                payload[key], f"pdf.{key}",
+                minimum=minimum, maximum=maximum, integer=integer)
+
+
+def _apply_mineru_config(current: dict, payload) -> None:
+    if not isinstance(payload, dict):
+        raise _config_error("INVALID_MINERU_CONFIG", "mineru 必须是对象", "请检查 MinerU 配置")
+    mineru = current.setdefault("mineru", {})
+
+    if "api_mode" in payload:
+        mode = payload["api_mode"]
+        if mode not in ("local", "remote"):
+            raise _config_error(
+                "INVALID_MINERU_CONFIG", "mineru.api_mode 只能是 local 或 remote",
+                "请选择本地或远程模式")
+        mineru["api_mode"] = mode
+    if "language" in payload:
+        mineru["language"] = _require_str(
+            payload["language"], "mineru.language",
+            max_len=32, pattern=r"^[A-Za-z0-9_-]+$")
+
+    local = payload.get("local")
+    if local is not None:
+        if not isinstance(local, dict):
+            raise _config_error(
+                "INVALID_MINERU_CONFIG", "mineru.local 必须是对象", "请检查 MinerU 配置")
+        target = mineru.setdefault("local", {})
+        if "base_url" in local:
+            url = _require_str(
+                local["base_url"], "mineru.local.base_url", max_len=512)
+            if not url.startswith(("http://", "https://")):
+                raise _config_error(
+                    "INVALID_MINERU_CONFIG",
+                    "mineru.local.base_url 必须以 http:// 或 https:// 开头",
+                    "示例: http://localhost:7860")
+            target["base_url"] = url
+        if "backend" in local:
+            target["backend"] = _require_str(
+                local["backend"], "mineru.local.backend",
+                max_len=64, pattern=r"^[A-Za-z0-9._-]+$")
+        if "parse_method" in local:
+            target["parse_method"] = _require_str(
+                local["parse_method"], "mineru.local.parse_method",
+                max_len=32, pattern=r"^[A-Za-z0-9._-]+$")
+        for key in ("formula_enable", "table_enable"):
+            if key in local:
+                target[key] = _require_bool(local[key], f"mineru.local.{key}")
+
+    remote = payload.get("remote")
+    if remote is not None:
+        if not isinstance(remote, dict):
+            raise _config_error(
+                "INVALID_MINERU_CONFIG", "mineru.remote 必须是对象", "请检查 MinerU 配置")
+        target = mineru.setdefault("remote", {})
+        if "model_version" in remote:
+            target["model_version"] = _require_str(
+                remote["model_version"], "mineru.remote.model_version",
+                max_len=64, pattern=r"^[A-Za-z0-9._-]+$")
+        if "page_ranges" in remote:
+            value = remote["page_ranges"]
+            if (
+                not isinstance(value, str)
+                or len(value) > 256
+                or any(ch in value for ch in ("\r", "\n", "\x00"))
+            ):
+                raise _config_error(
+                    "INVALID_MINERU_CONFIG", "mineru.remote.page_ranges 不合法",
+                    "页码范围应为逗号分隔的字符串，例如 1-10,20-30")
+            target["page_ranges"] = value.strip()
+        for key in ("is_ocr", "enable_formula", "enable_table"):
+            if key in remote:
+                target[key] = _require_bool(remote[key], f"mineru.remote.{key}")
+        if "extra_formats" in remote:
+            formats = remote["extra_formats"]
+            if (
+                not isinstance(formats, list)
+                or len(formats) > 16
+                or any(not isinstance(x, str) or len(x) > 16 for x in formats)
+            ):
+                raise _config_error(
+                    "INVALID_MINERU_CONFIG", "mineru.remote.extra_formats 不合法",
+                    "应为字符串数组，例如 [\"docx\"]")
+            target["extra_formats"] = formats
+
+
+@app.get("/api/config")
+def get_config():
+    data = _load_settings()
+    llm = data.get("llm", {}) or {}
+    return {
+        "ok": True,
+        "providers": llm.get("providers", {}) or {},
+        "routers": llm.get("routers", {}) or {},
+        "pdf": data.get("pdf", {}) or {},
+        "mineru": data.get("mineru", {}) or {},
+    }
+
+
+@app.post("/api/config")
+def update_config(body: dict):
+    """Persist the full web-facing config, preserving unrelated sections."""
+    current = _load_settings()
+    if "providers" in body or "delete_providers" in body or "routers" in body:
+        _apply_provider_updates(current, body)
+    if "pdf" in body:
+        _apply_pdf_config(current, body["pdf"])
+    if "mineru" in body:
+        _apply_mineru_config(current, body["mineru"])
     _save_settings(current)
     return {"ok": True}
 

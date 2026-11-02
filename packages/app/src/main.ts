@@ -6,7 +6,7 @@ import '@fontsource-variable/space-grotesk';
 import '@fontsource-variable/noto-sans-sc';
 import '@fontsource-variable/jetbrains-mono';
 import { checkHealth } from './api/backend';
-import { loadConfigUI, setupConfigTab } from './tabs/config';
+import { hydrateConfigFromServer, loadConfigUI, setupConfigTab } from './tabs/config';
 import { refreshRunJobs, resumeJob, scrollLogToLatest, setupRunTab } from './tabs/run';
 import { refreshOutputs, setupOutputsTab } from './tabs/outputs';
 import { enhanceSelects } from './ui/dropdown';
@@ -108,6 +108,7 @@ async function init(): Promise<void> {
   window.addEventListener('pagehide', () => clearInterval(healthTimer));
 
   try {
+    await hydrateConfigFromServer();
     await loadConfigUI();
   } catch (e) {
     console.warn('[pdf2skill] config UI load failed', e);
