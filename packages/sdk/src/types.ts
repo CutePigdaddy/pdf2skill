@@ -13,6 +13,10 @@ export interface ProviderConfig {
   chunking_model?: string;
   peeling_model?: string;
   skill_engine_model?: string;
+  /** OpenAI Chat Completions `reasoning_effort`; empty/absent = omit the field. */
+  chunking_reasoning_effort?: string;
+  peeling_reasoning_effort?: string;
+  skill_engine_reasoning_effort?: string;
 }
 
 export type StageRouter = 'chunking' | 'peeling' | 'skillEngine';
@@ -114,6 +118,11 @@ export interface JobMeta {
   inputName: string;
   completedStages: StageName[];
   updatedAt: number;
+}
+
+export interface JobSummary extends JobMeta {
+  /** Stage 1 checkpoint exists and its markdown file is still present. */
+  resumable: boolean;
 }
 
 export interface OutputTreeNode {

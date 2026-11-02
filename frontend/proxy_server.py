@@ -16,6 +16,8 @@ secrets and forwards traffic:
   - GET  /api/mineru/extract-results/batch/{batch_id}   poll MinerU batch results
   - GET  /api/mineru/download?url=         download the result ZIP
   - POST /api/mineru/local        convert via a self-hosted MinerU Gradio endpoint
+  - GET  /api/jobs                list resumable server-side ``outputs/`` jobs
+  - GET  /api/jobs/{id}/bundle    zip one server job for browser OPFS import
   - GET  /api/health              liveness probe
 
 All errors use the structured envelope {ok: false, error: {code, message, advice}}
@@ -65,7 +67,12 @@ ALLOWED_ORIGINS += [
 # the Origin check below is only safe when the Host itself is trusted: a
 # rebound page sends Host=attacker.com:8502 which matches its own Origin, so
 # "Origin == Host" alone must never be the gate.
-ALLOWED_HOSTS = {"127.0.0.1:8502", "localhost:8502"}
+# 8502 = standalone dev proxy (Vite on 5173); 8501 = mounted inside server.py,
+# which serves the built frontend from the same origin.
+ALLOWED_HOSTS = {
+    "127.0.0.1:8501", "localhost:8501",
+    "127.0.0.1:8502", "localhost:8502",
+}
 ALLOWED_HOSTS |= {
     h.strip().lower()
     for h in os.getenv("PDF2SKILL_ALLOWED_HOSTS", "").split(",")
@@ -73,6 +80,13 @@ ALLOWED_HOSTS |= {
 }
 
 app = FastAPI(title="pdf2skill-proxy")
+
+try:
+    from .job_bridge import router as job_bridge_router
+except ImportError:  # `python frontend/proxy_server.py`
+    from job_bridge import router as job_bridge_router
+
+app.include_router(job_bridge_router)
 
 app.add_middleware(
     CORSMiddleware,
@@ -93,7 +107,7 @@ async def _check_host_and_origin(request: Request, call_next):
             content=_err_payload(
                 "FORBIDDEN_HOST",
                 f"Host '{host or '(缺失)'}' 不在允许列表中",
-                "请通过 http://127.0.0.1:8502 或 http://localhost:8502 访问；"
+                "请通过 127.0.0.1/localhost 的 8501（server.py）或 8502（proxy_server.py）访问；"
                 "如经反向代理换端口，请用 PDF2SKILL_ALLOWED_HOSTS 追加",
             ),
         )
@@ -283,7 +297,8 @@ def health():
 def llm_chat(body: dict):
     """Forward a chat-completions request to the provider named in the body.
 
-    Body: {provider, model, messages, temperature?, max_tokens?, response_format?}.
+    Body: {provider, model, messages, temperature?, max_tokens?,
+           response_format?, reasoning_effort?}.
     The API key never leaves this process — the browser only names the provider.
 
     Returns: {ok: true, body: <upstream JSON>} or {ok: false, error: {code,...}}
@@ -317,6 +332,9 @@ def llm_chat(body: dict):
     }
     if body.get("response_format"):
         payload["response_format"] = body["response_format"]
+    reasoning_effort = body.get("reasoning_effort")
+    if isinstance(reasoning_effort, str) and reasoning_effort.strip():
+        payload["reasoning_effort"] = reasoning_effort.strip()
 
     url = f"{base_url}/chat/completions"
     headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}

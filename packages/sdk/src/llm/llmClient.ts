@@ -29,6 +29,7 @@ export class LlmClient {
   readonly provider: string;
   readonly model: string;
   readonly maxTokens: number;
+  readonly reasoningEffort: string;
 
   private readonly config: Pdf2SkillConfig;
   private readonly signal?: AbortSignal;
@@ -65,6 +66,14 @@ export class LlmClient {
       );
     }
     this.maxTokens = MAX_TOKENS_BY_STAGE[stage];
+    const effortKey =
+      stage === 'chunking'
+        ? 'chunking_reasoning_effort'
+        : stage === 'peeling'
+          ? 'peeling_reasoning_effort'
+          : 'skill_engine_reasoning_effort';
+    const effort = providerCfg[effortKey];
+    this.reasoningEffort = typeof effort === 'string' ? effort.trim() : '';
   }
 
   private stageLabel(): StageKey {
@@ -101,6 +110,7 @@ export class LlmClient {
       max_tokens: options.maxTokens ?? this.maxTokens,
     };
     if (options.isJson) payload.response_format = { type: 'json_object' };
+    if (this.reasoningEffort) payload.reasoning_effort = this.reasoningEffort;
 
     let resp: Response;
     try {

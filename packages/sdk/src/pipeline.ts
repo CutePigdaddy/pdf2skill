@@ -10,7 +10,7 @@ import { SkillEngine } from './stages/skillEngine';
 import { RemoteMinerUClient, LocalMinerUClient } from './mineru/clients';
 import { CheckpointManager } from './storage/checkpoint';
 import { validatePdfFull, sanitizeFilename } from './pdf/validator';
-import { ensureDir, fileExists, getDir, listDir, readText, removeEntry, writeBytes, writeText } from './storage/opfs';
+import { dirExists, ensureDir, fileExists, getDir, listDir, readText, removeEntry, writeBytes, writeText } from './storage/opfs';
 
 export interface PipelineInput {
   kind: 'pdf' | 'markdown';
@@ -40,6 +40,8 @@ export interface PipelineResult {
   referenceCount: number;
 }
 
+const PEEL_CACHE_DIR = 'peeling_cache';
+
 /**
  * Stage 4 keeps its own checkpoint (generated_skills/.checkpoint.json) whose
  * summaries are keyed by deterministic chunk ids. Any Stage 2/3 re-run
@@ -55,6 +57,48 @@ async function clearSkillCheckpoint(
   if (skillDir && (await fileExists(skillDir, '.checkpoint.json'))) {
     await removeEntry(skillDir, '.checkpoint.json');
     log('info', `${reason}: removed stale generated_skills checkpoint`);
+  }
+}
+
+/**
+ * Remove Stage 1 outputs so a re-run cannot reuse or mix old results. Stage 1
+ * skips whenever full.md exists, so --restart / --from-stage pdf_conversion
+ * must also drop cached split PDFs and raw conversion zips (parity:
+ * main.py::_clear_stage1_artifacts).
+ */
+async function clearStage1Artifacts(
+  jobRoot: FileSystemDirectoryHandle,
+  reason: string,
+  log: (level: 'info' | 'warn', message: string) => void,
+): Promise<void> {
+  const removed: string[] = [];
+  if (await fileExists(jobRoot, 'full.md')) {
+    await removeEntry(jobRoot, 'full.md');
+    removed.push('full.md');
+  }
+  if (await dirExists(jobRoot, 'splits')) {
+    await removeEntry(jobRoot, 'splits');
+    removed.push('splits/');
+  }
+  for (const entry of await listDir(jobRoot)) {
+    if (entry.kind === 'file' && entry.name.endsWith('_mineru_output.zip')) {
+      await removeEntry(jobRoot, entry.name);
+      removed.push(entry.name);
+    }
+  }
+  if (removed.length > 0) {
+    log('info', `${reason}: removed stale Stage 1 artifacts: ${removed.join(', ')}`);
+  }
+}
+
+async function clearPeelCache(
+  jobRoot: FileSystemDirectoryHandle,
+  reason: string,
+  log: (level: 'info' | 'warn', message: string) => void,
+): Promise<void> {
+  if (await dirExists(jobRoot, PEEL_CACHE_DIR)) {
+    await removeEntry(jobRoot, PEEL_CACHE_DIR);
+    log('info', `${reason}: removed peeling cache`);
   }
 }
 
@@ -83,17 +127,34 @@ export async function runPipeline(opts: RunPipelineOptions): Promise<PipelineRes
 
   if (opts.restart) {
     await checkpoint.clearAll();
-    if (await fileExists(jobRoot, 'full.md')) {
-      await removeEntry(jobRoot, 'full.md');
-      log('info', '--restart: removed stale full.md');
-    }
+    await clearStage1Artifacts(jobRoot, '--restart', log);
     await clearSkillCheckpoint(jobRoot, '--restart', log);
+    await clearPeelCache(jobRoot, '--restart', log);
     log('info', '--restart: all checkpoint data cleared');
   } else if (opts.fromStage) {
     await checkpoint.resetFromStage(opts.fromStage);
     // The tree is rebuilt below, so Stage 4's id-keyed summaries are stale.
     await clearSkillCheckpoint(jobRoot, `--from-stage ${opts.fromStage}`, log);
+    if (opts.fromStage === 'pdf_conversion') {
+      await clearStage1Artifacts(jobRoot, `--from-stage ${opts.fromStage}`, log);
+      // New markdown invalidates every cached peel result.
+      await clearPeelCache(jobRoot, `--from-stage ${opts.fromStage}`, log);
+    }
     log('info', `--from-stage ${opts.fromStage}: checkpoint reset from '${opts.fromStage}' onwards`);
+  }
+
+  // A fallback Stage 2 run never checkpoints, but Stage 3 may still have
+  // checkpointed a tree built from those fallback chunks. It must not outlive
+  // Stage 2, or the next successful chunking plan is silently discarded.
+  if (
+    !checkpoint.isStageCompleted('llm_chunking') &&
+    checkpoint.isStageCompleted('tree_merging')
+  ) {
+    await checkpoint.resetFromStage('llm_chunking');
+    log(
+      'warn',
+      'Checkpoint inconsistency: tree_merging completed without llm_chunking. Resetting from Stage 2.',
+    );
   }
 
   // ── Stage 1: PDF → Markdown ────────────────────────────────────────
@@ -183,10 +244,11 @@ export async function runPipeline(opts: RunPipelineOptions): Promise<PipelineRes
       chunkAnchorLength: config.pdf.chunk_anchor_length,
       chunkMinThreshold: config.pdf.chunk_min_threshold,
     },
-    onProgress: (idx, total, chunkId) =>
+    cacheDir: await ensureDir(jobRoot, PEEL_CACHE_DIR),
+    onProgress: (idx, total, chunkId, cached) =>
       stage('peeling', 'active', {
         percent: Math.trunc((idx / total) * 100),
-        detail: `${chunkId} (${idx}/${total})`,
+        detail: `${chunkId} (${idx}/${total})${cached ? ' · 缓存' : ''}`,
       }),
     log: (m) => log('info', m),
   });
@@ -198,8 +260,15 @@ export async function runPipeline(opts: RunPipelineOptions): Promise<PipelineRes
   if (!checkpoint.isStageCompleted('tree_merging')) {
     stage('peeling', 'active');
     log('info', '--- Stage 3: TOC Drilling & Merging ---');
+    // Rebuilding the tree may change chunk boundaries under the same
+    // deterministic ids, so Stage 4's summaries would describe old content.
+    await clearSkillCheckpoint(jobRoot, 'Stage 3 rebuild', log);
     masterRoot = await merger.buildAndMerge(baseChunks);
     await merger.saveResults(await ensureDir(jobRoot, 'full_chunks'), masterRoot);
+    log(
+      'info',
+      `Peeling cache: ${merger.cacheHits} hit(s), ${merger.cacheWrites} written.`,
+    );
     if (merger.peelErrors > 0) {
       log(
         'warn',

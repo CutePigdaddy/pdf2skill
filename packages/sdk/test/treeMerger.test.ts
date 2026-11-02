@@ -230,6 +230,97 @@ describe('recursivePeel', () => {
   });
 });
 
+describe('peeling cache', () => {
+  const cacheConfig = { chunkMinThreshold: 1, chunkMaxTokens: 1000 };
+
+  function cacheFixture(): { content: string; anchors: Array<Record<string, string>> } {
+    const secA = '# Section A\n\n' + 'alpha content '.repeat(200);
+    const secB = '# Section B\n\n' + 'beta content '.repeat(200);
+    const secC = '# Section C\n\n' + 'gamma content '.repeat(200);
+    return {
+      content: secA + secB + secC,
+      anchors: [
+        { anchor: '# Section B\n\nbeta content beta c', description: '', suggested_title: 'Section B' },
+        { anchor: '# Section C\n\ngamma content gamma ', description: '', suggested_title: 'Section C' },
+      ],
+    };
+  }
+
+  it('reuses a cached subtree without calling the LLM and assigns fresh ids', async () => {
+    const { content, anchors } = cacheFixture();
+    const jobRoot = mockOpfsRoot();
+    const cacheDir = await ensureDir(jobRoot, 'peeling_cache');
+
+    const llm1 = mockLlm(() => JSON.stringify({ anchors, is_atomic: false }));
+    const merger1 = new TreeMerger(llm1, { config: cacheConfig, cacheDir });
+    const root1 = await merger1.buildAndMerge([{ content, start_line: 1, end_line: 100 }]);
+    expect(root1.children[0].children.length).toBe(3);
+    expect(merger1.cacheWrites).toBeGreaterThan(0);
+
+    const progress: boolean[] = [];
+    const llm2 = mockLlm(() => {
+      throw new Error('cache miss');
+    });
+    const merger2 = new TreeMerger(llm2, {
+      config: cacheConfig,
+      cacheDir,
+      onProgress: (_idx, _total, _id, cached) => progress.push(!!cached),
+    });
+    const root2 = await merger2.buildAndMerge([{ content, start_line: 1, end_line: 100 }]);
+
+    expect(llm2.prompts).toEqual([]);
+    expect(merger2.cacheHits).toBeGreaterThan(0);
+    expect(root2.children[0].children.length).toBe(3);
+    expect(progress).toEqual([true]);
+
+    const ids = [root2.children[0].id, ...root2.children[0].children.map((c) => c.id)];
+    expect(new Set(ids).size).toBe(ids.length);
+    expect(root2.children[0].children[1].parentPath).toEqual(['Section A']);
+    expect(root2.children[0].children[1].content).toBe(root1.children[0].children[1].content);
+  });
+
+  it('does not cache a subtree that had peel errors', async () => {
+    const { content } = cacheFixture();
+    const jobRoot = mockOpfsRoot();
+    const cacheDir = await ensureDir(jobRoot, 'peeling_cache');
+
+    const broken = mockLlm(() => 'not json at all {{{');
+    const merger1 = new TreeMerger(broken, { config: cacheConfig, cacheDir });
+    await merger1.buildAndMerge([{ content, start_line: 1, end_line: 100 }]);
+    expect(merger1.peelErrors).toBe(1);
+    expect(merger1.cacheWrites).toBe(0);
+
+    const healthy = mockLlm(() => JSON.stringify({ anchors: [], is_atomic: false }));
+    const merger2 = new TreeMerger(healthy, { config: cacheConfig, cacheDir });
+    await merger2.buildAndMerge([{ content, start_line: 1, end_line: 100 }]);
+    expect(healthy.prompts.length).toBe(1);
+    expect(merger2.cacheHits).toBe(0);
+  });
+
+  it('invalidates the cache when peeling config changes', async () => {
+    const jobRoot = mockOpfsRoot();
+    const cacheDir = await ensureDir(jobRoot, 'peeling_cache');
+    const content = 'x'.repeat(60000);
+
+    const llm1 = mockLlm(() => JSON.stringify({ anchors: [], is_atomic: false }));
+    const merger1 = new TreeMerger(llm1, {
+      config: { chunkMaxTokens: 1000, chunkMinThreshold: 1 },
+      cacheDir,
+    });
+    await merger1.buildAndMerge([{ content }]);
+    expect(merger1.cacheWrites).toBe(1);
+
+    const llm2 = mockLlm(() => JSON.stringify({ anchors: [], is_atomic: false }));
+    const merger2 = new TreeMerger(llm2, {
+      config: { chunkMaxTokens: 1000, chunkMinThreshold: 1000 },
+      cacheDir,
+    });
+    await merger2.buildAndMerge([{ content }]);
+    expect(llm2.prompts.length).toBe(1);
+    expect(merger2.cacheHits).toBe(0);
+  });
+});
+
 describe('buildAndMerge and persistence', () => {
   it('builds a master root, detects TOC, and assigns sequential ids', async () => {
     const toc = '# 目录\n1. Chapter One ... 1\n2. Chapter Two ... 5';

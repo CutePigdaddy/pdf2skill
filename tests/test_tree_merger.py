@@ -86,6 +86,109 @@ class TestFindAnchorPosition:
         )
 
 
+class TestPeelingCache:
+    """Per-subtree cache: successful peels survive a restart; failed peels do not."""
+
+    def _anchored_response(self):
+        return json.dumps({
+            "anchors": [
+                {"anchor": "SECB_ANCHOR", "description": "", "suggested_title": "Title B"},
+                {"anchor": "SECC_ANCHOR", "description": "", "suggested_title": "Title C"},
+            ],
+            "is_atomic": False,
+        })
+
+    def _content(self):
+        return "a" * 1500 + "SECB_ANCHOR" + "b" * 1500 + "SECC_ANCHOR" + "c" * 1500
+
+    def test_reuses_cached_subtree_without_llm_and_assigns_fresh_ids(
+        self, monkeypatch, tmp_path
+    ):
+        cache_dir = tmp_path / "peeling_cache"
+        fake1 = FakeLLM(self._anchored_response())
+        monkeypatch.setattr("core.tree_merger.LLMClient", lambda stage: fake1)
+        merger1 = TreeMerger(cache_dir=cache_dir)
+        merger1.chunk_max_tokens = 500
+
+        content = self._content()
+        node1 = ChunkNode(id="chunk_0001", title="Big Chapter", parent_path=[], content=content)
+        merger1.recursive_peel(node1)
+        assert len(node1.children) == 3
+        assert merger1.cache_writes > 0
+
+        class NoCallLLM:
+            def __init__(self):
+                self.prompts = []
+
+            def chat(self, prompt):
+                self.prompts.append(prompt)
+                raise AssertionError("cache miss")
+
+        fake2 = NoCallLLM()
+        monkeypatch.setattr("core.tree_merger.LLMClient", lambda stage: fake2)
+        merger2 = TreeMerger(cache_dir=cache_dir)
+        merger2.chunk_max_tokens = 500
+        node2 = ChunkNode(id="chunk_0002", title="Big Chapter", parent_path=[], content=content)
+        merger2.recursive_peel(node2)
+
+        assert fake2.prompts == []
+        assert len(node2.children) == 3
+        assert merger2.cache_hits > 0
+        ids = [node2.id] + [child.id for child in node2.children]
+        assert len(ids) == len(set(ids))
+        assert node2.children[1].parent_path == ["Big Chapter"]
+
+    def test_does_not_cache_when_peel_had_errors(self, monkeypatch, tmp_path):
+        cache_dir = tmp_path / "peeling_cache"
+        fake1 = FakeLLM("not json at all {{{")
+        monkeypatch.setattr("core.tree_merger.LLMClient", lambda stage: fake1)
+        merger1 = TreeMerger(cache_dir=cache_dir)
+        merger1.chunk_max_tokens = 500
+        node1 = ChunkNode(
+            id="chunk_0001", title="Big", parent_path=[], content="x" * 60000
+        )
+        merger1.recursive_peel(node1)
+        assert merger1.peel_errors == 1
+        assert merger1.cache_writes == 0
+
+        fake2 = FakeLLM(json.dumps({"anchors": [], "is_atomic": False}))
+        monkeypatch.setattr("core.tree_merger.LLMClient", lambda stage: fake2)
+        merger2 = TreeMerger(cache_dir=cache_dir)
+        merger2.chunk_max_tokens = 500
+        node2 = ChunkNode(
+            id="chunk_0001", title="Big", parent_path=[], content="x" * 60000
+        )
+        merger2.recursive_peel(node2)
+        assert len(fake2.prompts) == 1
+        assert merger2.cache_hits == 0
+
+    def test_cache_key_invalidated_by_config_change(self, monkeypatch, tmp_path):
+        cache_dir = tmp_path / "peeling_cache"
+        content = "x" * 60000
+        response = json.dumps({"anchors": [], "is_atomic": False})
+
+        fake1 = FakeLLM(response)
+        monkeypatch.setattr("core.tree_merger.LLMClient", lambda stage: fake1)
+        merger1 = TreeMerger(cache_dir=cache_dir)
+        merger1.chunk_max_tokens = 500
+        merger1.chunk_min_threshold = 1
+        merger1.recursive_peel(
+            ChunkNode(id="chunk_0001", title="Big", parent_path=[], content=content)
+        )
+        assert merger1.cache_writes == 1
+
+        fake2 = FakeLLM(response)
+        monkeypatch.setattr("core.tree_merger.LLMClient", lambda stage: fake2)
+        merger2 = TreeMerger(cache_dir=cache_dir)
+        merger2.chunk_max_tokens = 500
+        merger2.chunk_min_threshold = 1000
+        merger2.recursive_peel(
+            ChunkNode(id="chunk_0001", title="Big", parent_path=[], content=content)
+        )
+        assert len(fake2.prompts) == 1
+        assert merger2.cache_hits == 0
+
+
 class TestSuggestedTitleAlignment:
     """Anchor i's title describes the segment STARTING at anchor i — the
     first segment has no LLM title. Guards against the off-by-one where

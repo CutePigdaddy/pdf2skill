@@ -77,7 +77,7 @@
       <div class="step-text">
         <ul>
           <li>在「阶段配置」中为 Chunking / Peeling / Skill Engine 三个阶段分别选择 Provider。</li>
-          <li>在「Provider 管理」中维护每个 Provider 的 <code>base_url</code>、API Key 环境变量名和三个阶段模型；可一键从服务端 <code>settings.yaml</code> 导入。</li>
+          <li>在「Provider 管理」中维护每个 Provider 的 <code>base_url</code>、API Key 环境变量名、三个阶段模型及思考强度；可一键从服务端 <code>settings.yaml</code> 导入。</li>
           <li>点「获取模型列表」拉取该 Provider 可用模型（需先把 Provider 同步到服务端）。</li>
         </ul>
       </div>
@@ -93,6 +93,7 @@
         <ul>
           <li>在「运行」面板拖拽或点击上传 PDF（≤200MB，自动校验格式/加密）或 Markdown 文件。</li>
           <li>点「开始运行」，实时查看四阶段进度与日志；可随时停止，checkpoint 保证下次断点续跑（同一文件再次上传即自动续跑）。</li>
+          <li>已有 CLI 任务可在「运行」面板点「从磁盘导入任务」，把服务端 <code>outputs/</code> 中的 checkpoint 与文件复制到浏览器后继续。</li>
         </ul>
       </div>
       <div class="step-goto"><button class="btn btn-secondary btn-sm" data-goto="run" data-anchor="dropzone">前往上传运行<i class="ph ph-arrow-right"></i></button></div>
@@ -165,7 +166,7 @@
   <div class="section-divider">
     <span class="section-label">Provider 管理</span>
   </div>
-  <p class="subtitle" style="margin-top:0">管理全部 LLM Provider：base_url、API Key 环境变量名、三个阶段模型，支持新增与删除。</p>
+  <p class="subtitle" style="margin-top:0">管理全部 LLM Provider：base_url、API Key 环境变量名、三个阶段模型与思考强度，支持新增与删除。</p>
 
   <div id="provider-rows"></div>
 
@@ -366,12 +367,26 @@
 <!-- ═══ Run Panel ═══ -->
 <div class="panel" id="panel-run">
   <h2>运行 Pipeline</h2>
-  <p class="subtitle">选择输入文件并启动处理流程。同一文件重复运行会自动断点续跑。</p>
+  <p class="subtitle">选择输入文件或已有任务并启动处理流程。同一任务重复运行会自动断点续跑。</p>
 
   <div class="run-grid">
   <!-- ── Input card ─────────────────────────────────────────────── -->
   <div class="card" id="upload-card">
-    <h3 style="margin-bottom:12px">选择输入文件</h3>
+    <h3 style="margin-bottom:12px">选择输入文件或继续已有任务</h3>
+
+    <div class="resume-job-block">
+      <label for="resume-job-select">继续已有任务（可选）</label>
+      <select id="resume-job-select">
+        <option value="">不使用已有任务</option>
+      </select>
+      <div class="field-hint" id="resume-job-hint">选择后可跳过上传，直接从该任务的 checkpoint 继续。只列出已完成 Stage 1 的任务。</div>
+      <div class="resume-job-actions">
+        <button class="btn btn-secondary btn-sm" id="btn-import-job" type="button">
+          <i class="ph ph-hard-drives"></i> 从磁盘导入任务
+        </button>
+      </div>
+    </div>
+
     <div class="file-input-zone" id="dropzone" role="button" tabindex="0" aria-label="选择或拖拽上传 PDF / Markdown 文件">
       <div class="zone-icon"><i class="ph ph-upload-simple"></i></div>
       <div class="zone-text">拖拽 PDF / Markdown 文件到此处，或点击选择</div>
@@ -402,10 +417,11 @@
         <select id="restart-mode">
           <option value="continue">继续运行（断点续跑）</option>
           <option value="from-pdf">从 PDF 解析重跑</option>
-          <option value="from-chunk">从分块重跑</option>
-          <option value="from-tree">从树合并重跑</option>
+          <option value="from-chunk">从 Chunking 重跑（保留 Peeling 缓存）</option>
+          <option value="from-tree">从 Peeling 重跑（复用已完成分块）</option>
           <option value="restart">全部清空重跑</option>
         </select>
+        <div class="field-hint">Chunking 与 Peeling 是两个独立阶段，Peeling 会按 chunk 缓存进度。</div>
       </div>
       <div>
         <label>输出名称（可选）</label>
@@ -491,6 +507,7 @@
   <div class="outputs-header">
     <div class="btn-bar">
       <select class="job-select" id="job-select"><option value="">选择任务…</option></select>
+      <button class="btn btn-ghost btn-sm" id="btn-resume-job" disabled><i class="ph ph-play"></i>继续任务</button>
       <button class="btn btn-primary btn-sm" id="btn-download-zip"><i class="ph ph-download-simple"></i>下载 zip</button>
       <button class="btn btn-danger btn-sm" id="btn-delete-job"><i class="ph ph-trash"></i>删除任务</button>
     </div>
@@ -511,6 +528,19 @@
   </div>
   <div class="file-viewer" id="file-viewer"></div>
 </div>
+
+<!-- ── Disk → OPFS import ────────────────────────────────────────── -->
+<dialog id="import-dialog" class="import-dialog" aria-labelledby="import-dialog-title">
+  <div class="import-dialog-head">
+    <div>
+      <h3 id="import-dialog-title">从磁盘导入任务</h3>
+      <p class="field-hint">扫描服务端 <code>outputs/</code>。导入后任务复制到浏览器 OPFS，可从已完成阶段继续。</p>
+    </div>
+    <button class="btn btn-ghost btn-sm" id="btn-import-close" type="button"><i class="ph ph-x"></i>关闭</button>
+  </div>
+  <div class="import-job-list" id="import-job-list"></div>
+  <div class="import-status" id="import-status"></div>
+</dialog>
 
 <!-- ── Toast ────────────────────────────────────────────────────── -->
 <div class="saved-toast" id="toast"></div>

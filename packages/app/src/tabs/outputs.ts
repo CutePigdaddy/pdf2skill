@@ -3,9 +3,21 @@ import type { JobMeta, OutputTreeNode } from '@pdf2skill/sdk';
 import { $, escapeHtml, errInfoOf, showToast } from '../ui/dom';
 import { syncSelect } from '../ui/dropdown';
 
+export interface OutputsTabOptions {
+  /** Switch to the Run tab with this job selected for resume. */
+  onResume?: (jobId: string) => void;
+}
+
 let pdf2skill: Pdf2Skill;
 let currentJobId = '';
 let blobUrl: string | null = null;
+let outputsOptions: OutputsTabOptions = {};
+let resumableJobIds = new Set<string>();
+
+function updateResumeButton(): void {
+  const btn = document.getElementById('btn-resume-job') as HTMLButtonElement | null;
+  if (btn) btn.disabled = !currentJobId || !resumableJobIds.has(currentJobId);
+}
 
 function fmtBytes(n: number): string {
   if (n < 1024) return n + 'B';
@@ -32,6 +44,7 @@ async function updateStorageUsage(): Promise<void> {
 async function refreshJobList(): Promise<void> {
   const sel = $('job-select') as HTMLSelectElement;
   const jobs = await pdf2skill.listJobs();
+  resumableJobIds = new Set(jobs.filter((j) => j.resumable).map((j) => j.jobId));
   const prev = currentJobId;
   sel.innerHTML = '<option value="">选择任务…</option>' + jobs
     .map((j: JobMeta) => {
@@ -43,6 +56,7 @@ async function refreshJobList(): Promise<void> {
   if (prev && jobs.some((j) => j.jobId === prev)) sel.value = prev;
   currentJobId = sel.value;
   syncSelect(sel);
+  updateResumeButton();
 }
 
 // ── Tree rendering ────────────────────────────────────────────────
@@ -181,15 +195,31 @@ async function deleteJob(): Promise<void> {
 
 // ── Wire up ───────────────────────────────────────────────────────
 
-export function setupOutputsTab(sdkInstance: Pdf2Skill): void {
+export function setupOutputsTab(
+  sdkInstance: Pdf2Skill,
+  options: OutputsTabOptions = {},
+): void {
   pdf2skill = sdkInstance;
+  outputsOptions = options;
   ($('job-select') as HTMLSelectElement).addEventListener('change', (e) => {
     currentJobId = (e.target as HTMLSelectElement).value;
+    updateResumeButton();
     void loadTree();
   });
   $('btn-refresh-outputs').addEventListener('click', () => void refreshOutputs());
   $('btn-download-zip').addEventListener('click', () => void downloadZip());
   $('btn-delete-job').addEventListener('click', () => void deleteJob());
+  $('btn-resume-job').addEventListener('click', () => {
+    if (!currentJobId) {
+      showToast('请先选择任务', 'warn');
+      return;
+    }
+    if (!resumableJobIds.has(currentJobId)) {
+      showToast('该任务缺少 Stage 1 输入，无法继续；请重新上传原文件', 'warn');
+      return;
+    }
+    outputsOptions.onResume?.(currentJobId);
+  });
 }
 
 export async function refreshOutputs(): Promise<void> {

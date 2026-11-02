@@ -3,11 +3,14 @@ import { listDir, readBlob } from '../storage/opfs';
 
 /** SDK bookkeeping files that never appear in a Python outputs/ directory. */
 const EXCLUDED_FILES = new Set(['job.json', 'input.pdf', 'input.md']);
+/** Internal caches are resumable state, not downloadable output. */
+const EXCLUDED_DIRS = new Set(['peeling_cache']);
 
 async function addDir(zip: JSZip, dir: FileSystemDirectoryHandle, prefix: string): Promise<void> {
   for (const entry of await listDir(dir)) {
     const path = prefix ? `${prefix}/${entry.name}` : entry.name;
     if (entry.kind === 'directory') {
+      if (EXCLUDED_DIRS.has(entry.name)) continue;
       await addDir(zip, await dir.getDirectoryHandle(entry.name), path);
     } else if (!EXCLUDED_FILES.has(entry.name)) {
       const blob = await readBlob(dir, entry.name);

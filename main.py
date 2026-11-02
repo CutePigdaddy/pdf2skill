@@ -30,6 +30,14 @@ def _clear_skill_checkpoint(out_dir: Path, reason: str):
         logger.info(f"{reason}: removed stale generated_skills checkpoint")
 
 
+def _clear_peeling_cache(out_dir: Path, reason: str):
+    """Drop cached peel subtrees when the source markdown is rebuilt."""
+    cache_dir = out_dir / "peeling_cache"
+    if cache_dir.is_dir():
+        shutil.rmtree(cache_dir, ignore_errors=True)
+        logger.info(f"{reason}: removed peeling cache")
+
+
 def _clear_stage1_artifacts(out_dir: Path, reason: str):
     """Remove Stage 1 outputs so a re-run cannot reuse or mix old results.
 
@@ -81,6 +89,7 @@ def run_pipeline(pdf_path: str, output_dir: str, from_stage: str = None, restart
         # sub-checkpoint so old summaries can't leak into the rebuilt tree.
         _clear_stage1_artifacts(out_dir, "--restart")
         _clear_skill_checkpoint(out_dir, "--restart")
+        _clear_peeling_cache(out_dir, "--restart")
         logger.info("--restart: all checkpoint data cleared")
     elif from_stage:
         checkpoint.reset_from_stage(from_stage)
@@ -88,7 +97,21 @@ def run_pipeline(pdf_path: str, output_dir: str, from_stage: str = None, restart
         _clear_skill_checkpoint(out_dir, f"--from-stage {from_stage}")
         if from_stage == "pdf_conversion":
             _clear_stage1_artifacts(out_dir, f"--from-stage {from_stage}")
+            _clear_peeling_cache(out_dir, f"--from-stage {from_stage}")
         logger.info(f"--from-stage {from_stage}: checkpoint reset from '{from_stage}' onwards")
+
+    # A fallback Stage 2 run never checkpoints, but Stage 3 may still have
+    # checkpointed a tree built from those fallback chunks. It must not outlive
+    # Stage 2, or the next successful chunking plan is silently discarded.
+    if (
+        not checkpoint.is_stage_completed("llm_chunking")
+        and checkpoint.is_stage_completed("tree_merging")
+    ):
+        logger.warning(
+            "Checkpoint inconsistency: tree_merging completed without llm_chunking. "
+            "Resetting from Stage 2."
+        )
+        checkpoint.reset_from_stage("llm_chunking")
 
     # 1. PDF -> Markdown
     if not checkpoint.is_stage_completed("pdf_conversion"):
@@ -116,7 +139,7 @@ def run_pipeline(pdf_path: str, output_dir: str, from_stage: str = None, restart
         logger.info(f"Loaded {len(base_chunks)} base chunks from checkpoint")
 
     # Keep raw chunks in a separate folder for parity with the legacy project.
-    merger = TreeMerger()
+    merger = TreeMerger(cache_dir=out_dir / "peeling_cache")
     raw_chunks_dir = out_dir / "full_chunks_original"
     merger.save_original_chunks(raw_chunks_dir, base_chunks)
     logger.info(f"Original chunks saved to: {raw_chunks_dir}")
@@ -124,10 +147,16 @@ def run_pipeline(pdf_path: str, output_dir: str, from_stage: str = None, restart
     # 3. Tree Merging & TOC Drilling
     if not checkpoint.is_stage_completed("tree_merging"):
         logger.info("--- Stage 3: TOC Drilling & Merging ---")
+        # Rebuilding the tree may change chunk boundaries under the same
+        # deterministic ids, so Stage 4's summaries would describe old content.
+        _clear_skill_checkpoint(out_dir, "Stage 3 rebuild")
         master_root = merger.build_and_merge(base_chunks)
         peeled_chunks_dir = out_dir / "full_chunks"
         merger.save_results(peeled_chunks_dir, master_root)
         logger.info(f"Peeled chunks saved to: {peeled_chunks_dir}")
+        logger.info(
+            f"Peeling cache: {merger.cache_hits} hit(s), {merger.cache_writes} written."
+        )
         if merger.peel_errors > 0:
             logger.warning(
                 f"Stage 3 had {merger.peel_errors} LLM error(s) during peeling. "

@@ -85,7 +85,14 @@ class LLMClient:
             "skill_engine": 16000
         }
         self.max_tokens = int(os.getenv(f"{stage.upper()}_MAX_TOKENS", max_tokens_by_stage.get(stage, 16000)))
-        
+
+        # 7. Optional OpenAI Chat Completions reasoning effort
+        self.reasoning_effort = str(
+            os.getenv(f"{stage.upper()}_REASONING_EFFORT")
+            or provider_cfg.get(f"{stage}_reasoning_effort")
+            or ""
+        ).strip()
+
         self.headers = {
             "Authorization": f"Bearer {self.api_key}",
             "Content-Type": "application/json"
@@ -98,7 +105,7 @@ class LLMClient:
             "REQUEST_INTERVAL",
             config.get("llm.request_interval", config.get("pdf.request_interval", 0.0)),
         ))
-        logger.info(f"Initialized LLMClient [{self.stage}] -> provider: {self.provider}, model: {self.model}, base_url: {self.base_url}, interval: {self.request_interval}s")
+        logger.info(f"Initialized LLMClient [{self.stage}] -> provider: {self.provider}, model: {self.model}, reasoning_effort: {self.reasoning_effort or '(default)'}, base_url: {self.base_url}, interval: {self.request_interval}s")
 
     def chat(self, prompt: str, is_json: bool = False, max_tokens: int = None) -> str:
         """Send a prompt to the configured LLM provider and return the response.
@@ -136,6 +143,9 @@ class LLMClient:
 
         if is_json:
             payload["response_format"] = {"type": "json_object"}
+
+        if self.reasoning_effort:
+            payload["reasoning_effort"] = self.reasoning_effort
 
         url = f"{self.base_url}/chat/completions"
         logger.debug(f"Sending request to provider={self.provider} model={self.model}")

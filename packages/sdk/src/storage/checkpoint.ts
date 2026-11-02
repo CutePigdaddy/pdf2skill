@@ -34,14 +34,20 @@ export class CheckpointManager {
     if (!(await fileExists(this.dir, this.fileName))) return;
     try {
       const raw = await readText(this.dir, this.fileName);
-      const data = JSON.parse(raw) as CheckpointState;
-      if (data.version !== CHECKPOINT_VERSION) {
+      const data = JSON.parse(raw) as Partial<CheckpointState> | null;
+      const validShape =
+        typeof data === 'object' &&
+        data !== null &&
+        Array.isArray(data.completed_stages) &&
+        typeof data.data === 'object' &&
+        data.data !== null;
+      if (!validShape || data.version !== CHECKPOINT_VERSION) {
         console.warn(
-          `[pdf2skill] Checkpoint version mismatch (expected ${CHECKPOINT_VERSION}, got ${data.version}). Resetting.`,
+          `[pdf2skill] Checkpoint invalid or version mismatch (expected ${CHECKPOINT_VERSION}). Resetting.`,
         );
         return;
       }
-      this.state = data;
+      this.state = data as CheckpointState;
     } catch (e) {
       console.warn(`[pdf2skill] Failed to load checkpoint: ${e}. Resetting.`);
       this.state = this.emptyState();

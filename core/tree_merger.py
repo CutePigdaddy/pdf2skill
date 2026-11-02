@@ -1,5 +1,7 @@
-import re
+import hashlib
 import json
+import os
+import re
 import shutil
 import requests
 from pathlib import Path
@@ -10,6 +12,9 @@ from utils.llm_client import LLMClient
 from utils.retry_client import NetworkError, RateLimitError, LLMConnectionError
 from config.config import config
 from Levenshtein import distance as levenshtein_distance
+
+# Bump when the peel prompt or split algorithm changes.
+PEEL_CACHE_VERSION = 1
 
 @dataclass
 class ChunkNode:
@@ -57,19 +62,122 @@ class TreeMerger:
     identifying sub-headers using an LLM, until all chunks are within
     the token limit.
     """
-    def __init__(self):
+    def __init__(self, cache_dir: Path | None = None):
         self.chunk_max_tokens = config.get("pdf.chunk_max_tokens", 10000)
         self.chunk_max_iterations = config.get("pdf.chunk_max_iterations", 5)
         self.chunk_anchor_length = config.get("pdf.chunk_anchor_length", 30)
+        self.chunk_min_threshold = config.get("pdf.chunk_min_threshold", 1000)
         self.output_language = config.get("system.output_language", "English")
         self.llm = LLMClient(stage="peeling")
         self.chunk_counter = 0
         self.peel_errors = 0  # Track LLM failures during peeling
+        self.cache_hits = 0
+        self.cache_writes = 0
+        self.cache_dir = Path(cache_dir) if cache_dir is not None else None
         self._peel_bar = None  # tqdm bar for build_and_merge
 
     def _generate_chunk_id(self) -> str:
         self.chunk_counter += 1
         return f"chunk_{self.chunk_counter:04d}"
+
+    def _ensure_counter_above(self, chunk_id: str) -> None:
+        """Keep generated ids above an existing node id (manual/test trees)."""
+        match = re.fullmatch(r"chunk_(\d+)", chunk_id)
+        if match:
+            self.chunk_counter = max(self.chunk_counter, int(match.group(1)))
+
+    def _cache_key(self, chunk: ChunkNode, iteration: int) -> str:
+        payload = {
+            "v": PEEL_CACHE_VERSION,
+            "content": chunk.content,
+            "title": chunk.title,
+            "parentPath": chunk.parent_path,
+            "startLine": chunk.start_line,
+            "endLine": chunk.end_line,
+            "iteration": iteration,
+            "config": [
+                self.chunk_max_tokens,
+                self.chunk_max_iterations,
+                self.chunk_anchor_length,
+                self.chunk_min_threshold,
+            ],
+        }
+        raw = json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
+        return hashlib.sha256(raw.encode("utf-8")).hexdigest()
+
+    def _load_cached_subtree(self, key: str) -> ChunkNode | None:
+        if self.cache_dir is None:
+            return None
+        path = self.cache_dir / f"{key}.json"
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            if not isinstance(data, dict) or data.get("version") != PEEL_CACHE_VERSION:
+                return None
+            node = data.get("node")
+            if not isinstance(node, dict):
+                return None
+            return ChunkNode.from_dict(node)
+        except (OSError, json.JSONDecodeError, KeyError, TypeError, AttributeError):
+            return None
+
+    def _save_cached_subtree(
+        self, key: str | None, chunk: ChunkNode, errors_before: int
+    ) -> None:
+        if self.cache_dir is None or not key or self.peel_errors != errors_before:
+            return
+        self.cache_dir.mkdir(parents=True, exist_ok=True)
+        tmp_path = self.cache_dir / f"{key}.json.tmp"
+        final_path = self.cache_dir / f"{key}.json"
+        try:
+            with open(tmp_path, "w", encoding="utf-8") as f:
+                json.dump(
+                    {"version": PEEL_CACHE_VERSION, "node": chunk.to_dict()},
+                    f,
+                    ensure_ascii=False,
+                    separators=(",", ":"),
+                )
+            os.replace(tmp_path, final_path)
+            self.cache_writes += 1
+        except OSError as e:
+            logger.warning(f"    Cache write failed for {chunk.id}: {e}")
+            try:
+                tmp_path.unlink(missing_ok=True)
+            except OSError:
+                pass
+
+    def _adopt_cached_subtree(self, target: ChunkNode, source: ChunkNode) -> None:
+        """Copy a cached subtree onto the current node, assigning fresh ids."""
+        target.is_atomic = source.is_atomic
+        parent_path = target.parent_path + [target.title]
+        target.children = [
+            self._clone_cached_node(child, parent_path) for child in source.children
+        ]
+
+    def _clone_cached_node(self, source: ChunkNode, parent_path: list) -> ChunkNode:
+        node = ChunkNode(
+            id=self._generate_chunk_id(),
+            title=source.title,
+            parent_path=list(parent_path),
+            content=source.content,
+            start_line=source.start_line,
+            end_line=source.end_line,
+            iteration=source.iteration,
+            is_atomic=source.is_atomic,
+        )
+        node.children = [
+            self._clone_cached_node(child, list(parent_path) + [node.title])
+            for child in source.children
+        ]
+        return node
+
+    def _collect_leaves(self, node: ChunkNode) -> list[ChunkNode]:
+        if not node.children:
+            return [node]
+        leaves = []
+        for child in node.children:
+            leaves.extend(self._collect_leaves(child))
+        return leaves
 
     def estimate_tokens(self, text: str) -> int:
         """Rough token estimate weighted by character composition.
@@ -168,6 +276,7 @@ class TreeMerger:
         Returns:
             List of smaller sub-chunks (leaf nodes).
         """
+        self._ensure_counter_above(chunk.id)
         if getattr(chunk, 'is_atomic', False):
             logger.debug(f"  [Atomic Protection] Skipping recursive peel for: {chunk.title} (ID: {chunk.id})")
             tqdm.write(f"  [Atomic] {chunk.title}")
@@ -181,6 +290,18 @@ class TreeMerger:
         if estimated_tokens <= self.chunk_max_tokens:
             logger.debug(f"  Chunk {chunk.id} is small enough ({estimated_tokens:,} tokens)")
             return [chunk]
+
+        errors_before = self.peel_errors
+        cache_key = (
+            self._cache_key(chunk, current_iteration) if self.cache_dir is not None else None
+        )
+        if cache_key:
+            cached = self._load_cached_subtree(cache_key)
+            if cached is not None:
+                self._adopt_cached_subtree(chunk, cached)
+                self.cache_hits += 1
+                logger.info(f"  [Cache] {chunk.title}")
+                return self._collect_leaves(chunk)
 
         logger.info(f"  Peeling {chunk.id} (iteration {current_iteration}, ~{estimated_tokens:,} tokens)...")
         if self._peel_bar is not None:
@@ -262,6 +383,7 @@ Return ONLY the JSON object. No prose."""
                 logger.debug(f"  [AI Decision] Chunk {chunk.id} marked as ATOMIC. Skipping split.")
                 tqdm.write(f"  [Atomic] {chunk.title} (AI decision)")
                 chunk.is_atomic = True
+                self._save_cached_subtree(cache_key, chunk, errors_before)
                 return [chunk]
 
             anchors = result.get("anchors", [])
@@ -285,6 +407,7 @@ Return ONLY the JSON object. No prose."""
 
         if not anchors:
             logger.debug("    No anchors found, keeping chunk as-is")
+            self._save_cached_subtree(cache_key, chunk, errors_before)
             return [chunk]
 
         split_positions = [0]
@@ -315,6 +438,7 @@ Return ONLY the JSON object. No prose."""
 
         if len(split_positions) <= 2:
             logger.debug("    No valid split positions found")
+            self._save_cached_subtree(cache_key, chunk, errors_before)
             return [chunk]
 
         raw_child_chunks = []
@@ -343,7 +467,7 @@ Return ONLY the JSON object. No prose."""
             })
 
         # Tiny Chunk Auto-Merging
-        min_threshold = config.get("pdf.chunk_min_threshold", 1000)
+        min_threshold = self.chunk_min_threshold
         child_chunks = []
         
         i = 0
@@ -391,6 +515,7 @@ Return ONLY the JSON object. No prose."""
             final_chunks.extend(self.recursive_peel(child, current_iteration + 1))
 
         chunk.children = child_chunks
+        self._save_cached_subtree(cache_key, chunk, errors_before)
 
         return final_chunks
 
@@ -404,6 +529,8 @@ Return ONLY the JSON object. No prose."""
             A ``ChunkNode`` tree rooted at the master node.
         """
         self.peel_errors = 0  # Reset error counter for this run
+        self.cache_hits = 0
+        self.cache_writes = 0
         master_root = ChunkNode(id="master", title="Document", parent_path=[])
         self._peel_bar = tqdm(total=len(llm_chunks), desc="Peeling", unit="chunk", ncols=80)
 
@@ -458,6 +585,8 @@ Return ONLY the JSON object. No prose."""
 
         self._peel_bar.close()
         self._peel_bar = None
+        if self.cache_hits > 0:
+            logger.info(f"  [Cache] reused {self.cache_hits} peeled subtree(s)")
         return master_root
 
     def _write_chunk_files(self, output_dir: Path, chunks: list[ChunkNode], include_tree: bool = False, root: ChunkNode = None) -> Path:

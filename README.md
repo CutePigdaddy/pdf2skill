@@ -9,9 +9,9 @@
 - **树状合并**：递归剥离大块内容，Levenshtein 模糊匹配定位子标题，直至每块在 token 阈值内
 - **技能生成**：为每个 chunk 提取关键词标签，生成 SKILL.md 主索引和独立参考文件
 - **OpenAI 兼容**：所有 LLM 请求走 OpenAI Chat Completions 格式，支持任意兼容供应商
-- **断点续传**：checkpoint 机制支持中断后续传、`--from-stage` 选择性重跑、`--restart` 全部重来
+- **断点续传**：Stage 2/3 独立 checkpoint；Peeling 按 chunk 缓存已完成子树，`--from-stage` 选择性重跑、`--restart` 全部重来
 - **纯前端模式**：TypeScript SDK（`@pdf2skill/sdk`）在浏览器内完成全部流水线（OPFS 存储、断点续传、zip 导出），后端只做 LLM / MinerU 代理
-- **Web 界面**：Vite + TS 演示界面，配置/运行/输出一站式操作（旧版 FastAPI 全栈界面已弃用，见 `frontend/server.py`）
+- **Web 界面**：Vite + TS 演示界面，配置/运行/输出一站式操作；`python frontend/server.py` 单入口托管构建后的界面与代理 API
 
 ## Pipeline 概览
 
@@ -79,14 +79,26 @@ python main.py "path/to/book.pdf" --restart
 
 `--from-stage` 可选值：`pdf_conversion`、`llm_chunking`、`tree_merging`
 
-**Web 界面**
+- `llm_chunking`：保留 Stage 1，重跑分块；内容未变化的 chunk 会复用 `peeling_cache/`，不会重做 Peeling
+- `tree_merging`：保留分块，只补齐尚未完成的 Peeling 子树
+- `pdf_conversion` / `--restart`：同时清空 `peeling_cache/`，避免旧 markdown 的剥离结果混入
+
+Stage 2 本身是一次 LLM 规划调用（失败重试一次），没有可切的中间进度；Stage 3 的 Peeling 才按子树缓存。
+
+**Web 界面（单入口）**
 
 ```bash
+npm install
+npm run build            # 构建新版工作台到 packages/app/dist
 python frontend/server.py
 # 浏览器访问 http://localhost:8501
 ```
 
-> ⚠️ 旧版 Web 界面（`frontend/server.py`）已弃用，仅过渡期保留。推荐使用下方的**纯前端模式**。
+`server.py` 同时托管构建后的新版工作台与 `/api/*` 代理（LLM / MinerU 转发），API Key 只保存在服务端进程内。前端开发时改用下文的 Vite 开发模式。
+
+新版工作台的「运行」页可直接选择当前浏览器 OPFS 中已完成 Stage 1 的任务继续，无需重新上传原文件；「输出」页也提供「继续任务」入口。浏览器任务按 origin 隔离（`127.0.0.1:8501`、`localhost:8501`、`5173` 各自独立）。
+
+CLI 写在项目根目录 `outputs/` 的任务不会自动出现在浏览器列表里，但可以在「运行」页点「从磁盘导入任务」：服务端 `GET /api/jobs` 列出可续跑的磁盘任务，`GET /api/jobs/{id}/bundle` 打包 checkpoint、`full.md`、图片、分块与技能文件，浏览器解压写入 OPFS 后即可按原有阶段数继续。打包会排除 `splits/`、MinerU 分段目录与原始 zip（Stage 1 已完成，不需要它们）。
 
 ## 纯前端模式（SDK + 演示界面）
 
@@ -95,7 +107,7 @@ python frontend/server.py
 1. **LLM 转发**（`POST /api/llm/chat`）——持有 API Key，Key 永不进入浏览器
 2. **MinerU 转发**（`/api/mineru/*`）——官方 API 与自部署 Gradio 全部经代理访问
 
-### 启动
+### 启动（开发模式）
 
 ```bash
 npm install
@@ -139,17 +151,30 @@ const result = await pdf2skill.run({
 });
 
 // 任务管理 / 输出浏览 / 导出
-const jobs = await pdf2skill.listJobs();
+const jobs = await pdf2skill.listJobs(); // completedStages + resumable
 const tree = await pdf2skill.listOutputTree(jobs[0].jobId);
 const zip = await pdf2skill.exportZip(jobs[0].jobId); // Blob，可直接触发下载
+
+// 不重新上传原文件，直接从已有任务的 checkpoint 继续
+if (jobs[0].resumable) {
+  await pdf2skill.resume(jobs[0].jobId, { fromStage: 'tree_merging' });
+}
+
+// 把服务端 outputs/ 中的 CLI 任务导入 OPFS，再按 checkpoint 继续
+const resp = await fetch(`/api/jobs/${encodeURIComponent('my-book')}/bundle`);
+const imported = await pdf2skill.importJob(
+  'my-book',
+  new Uint8Array(await resp.arrayBuffer()),
+);
+console.log(imported.completedStages); // ['pdf_conversion', 'llm_chunking', ...]
 ```
 
-SDK 通过同源后端 `/api/llm/chat` 与 `/api/mineru/*` 调用 LLM 与 MinerU，部署时需保证页面与代理后端同源（或同域反代）。中断后重新运行同一文件自动从 checkpoint 续跑；`abort()`、`resume()`、`deleteJob()` 语义与 CLI 一致。
+SDK 通过同源后端 `/api/llm/chat` 与 `/api/mineru/*` 调用 LLM 与 MinerU，部署时需保证页面与代理后端同源（或同域反代）。中断后重新运行同一文件自动从 checkpoint 续跑；`abort()`、`resume()`、`importJob()`、`deleteJob()` 语义与 CLI 一致。`resume()` 只依赖 OPFS 中的 Stage 1 markdown，因此 `listJobs()` 用 `resumable` 标记哪些任务可以不再上传原文件直接继续。
 
 ### SDK 测试
 
 ```bash
-npm test   # vitest，145 个用例（分块 / 剥离 / 技能生成 / 流水线 / 门面 / 命名校验 / 与 Python 录制回放逐字节对齐）
+npm test   # vitest，162 个用例（分块 / 剥离与缓存 / 技能生成 / 流水线 / 任务导入 / 门面 / 命名校验 / 与 Python 录制回放逐字节对齐）
 ```
 
 ## 配置
@@ -176,6 +201,9 @@ npm test   # vitest，145 个用例（分块 / 剥离 / 技能生成 / 流水线
 | `chunking_model` | Stage 2 使用的模型 |
 | `peeling_model` | Stage 3 使用的模型 |
 | `skill_engine_model` | Stage 4 使用的模型 |
+| `chunking_reasoning_effort` | Stage 2 的思考强度（可选，`reasoning_effort`） |
+| `peeling_reasoning_effort` | Stage 3 的思考强度（可选） |
+| `skill_engine_reasoning_effort` | Stage 4 的思考强度（可选） |
 
 **内置 Provider 示例：**
 
@@ -200,6 +228,10 @@ llm:
       chunking_model: model-name-a
       peeling_model: model-name-b
       skill_engine_model: model-name-c
+      # 可选：OpenAI Chat Completions 的 reasoning_effort
+      chunking_reasoning_effort: low
+      peeling_reasoning_effort: high
+      skill_engine_reasoning_effort: high
 ```
 
 ```bash
@@ -224,11 +256,21 @@ SKILL_ENGINE_PROVIDER="my-provider"
 2. `settings.yaml` 中 `llm.providers.{provider}.{stage}_model`
 3. 缺失时报错
 
+**思考强度**（可选）：每个阶段可单独设置 OpenAI Chat Completions 的 `reasoning_effort`，内置预设为 `none` / `minimal` / `low` / `medium` / `high` / `xhigh` / `max`；留空表示不发送该字段（由 Provider/模型使用默认值）。不同模型支持的档位不同，不支持的档位会被 Provider 拒绝（HTTP 400）。Provider 的 `/models` 接口通常不返回该元数据，因此 Web 配置页直接提供上述预设。
+
+Python CLI 的覆盖优先级：
+
+1. `{STAGE}_REASONING_EFFORT` 环境变量（如 `PEELING_REASONING_EFFORT`）
+2. `{PROVIDER_NAME}_{STAGE}_REASONING_EFFORT` 环境变量（如 `GOOGLE_PEELING_REASONING_EFFORT`）
+3. `settings.yaml` 中 `llm.providers.{provider}.{stage}_reasoning_effort`
+4. 留空不发送
+
 **Provider 字段环境变量覆盖**：格式为 `{PROVIDER_NAME}_{FIELD}`（连字符转下划线）：
 
 ```bash
 SILICONFLOW_BASE_URL="https://custom-proxy.example.com/v1"
 GOOGLE_CHUNKING_MODEL="gemini-2.0-flash"
+GOOGLE_PEELING_REASONING_EFFORT="high"
 LOCAL_VLLM_BASE_URL="http://192.168.1.100:8000/v1"
 ```
 
@@ -264,6 +306,7 @@ outputs/
     │   ├── chunks/
     │   ├── chunks_index.json
     │   └── tree.json
+    ├── peeling_cache/          # Peeling 子树缓存（内部状态，不打包进 zip）
     └── generated_skills/       # Stage 4 技能文件
         ├── SKILL.md            # 主索引
         └── references/         # 各 chunk 参考
@@ -284,17 +327,17 @@ core/
   skill_engine.py        # Stage 4: Skill Engine 技能生成
   onboarding.py          # 首次运行引导向导
 frontend/
-  server.py              # 旧版 FastAPI 全栈后端（已弃用，过渡期保留）
-  proxy_server.py        # 纯前端模式的瘦代理后端（LLM / MinerU 转发）
-  static/index.html      # 旧版 SPA 前端（已弃用）
+  server.py              # 单入口：托管 packages/app/dist + 挂载代理 API（8501）
+  proxy_server.py        # 瘦代理后端（LLM / MinerU 转发；开发模式 8502）
+  job_bridge.py          # 磁盘 outputs/ 任务列表与打包（供浏览器导入 OPFS）
 packages/
   sdk/                   # @pdf2skill/sdk：浏览器端流水线 SDK（Vite lib mode）
     src/
       pipeline.ts        # 四阶段编排（对应 main.py run_pipeline）
       pdf2skill.ts       # Pdf2Skill 门面类
-      stages/            # llmChunker / treeMerger / skillEngine
+      stages/            # llmChunker / treeMerger / peelCache / skillEngine
       mineru/            # MinerU 客户端 + zip 解压（经代理）
-      storage/           # OPFS 封装 + checkpoint
+      storage/           # OPFS 封装 + checkpoint + importJob（磁盘任务导入）
       export/zip.ts      # zip 导出
     test/                # vitest 单测 + 与 Python 的录制回放对齐测试
   app/                   # @pdf2skill/app：纯前端演示界面（Vite + TS，4 Tab）
@@ -310,10 +353,10 @@ tests/                   # pytest 测试（testpaths 已限定在此目录）
 ## 测试
 
 ```bash
-# Python 单元测试（核心逻辑 + 代理安全 + 回归）
+# Python 单元测试（88 passed，核心逻辑 + 代理安全 + 任务桥接 + 回归）
 python -m pytest tests -q
 
-# SDK 单元测试（145 个用例，vitest）
+# SDK 单元测试（162 个用例，vitest）
 npm test
 
 # 手工脚本（非 pytest 用例，需配置 .env，会调用真实 API）

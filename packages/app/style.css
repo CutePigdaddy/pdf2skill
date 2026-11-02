@@ -472,6 +472,10 @@ select option {
   border-color: var(--muted-soft);
   background: #fbfcfe;
 }
+.dd-trigger:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
 .dd-trigger:focus-visible {
   outline: none;
   border-color: var(--primary);
@@ -802,7 +806,9 @@ input:disabled, select:disabled { opacity: 0.5; cursor: not-allowed; }
   padding-top: var(--space-md);
 }
 .pf-field label { margin-bottom: 4px; }
-.pf-field input { max-width: 100%; }
+.pf-field .pf-sub-label { margin-top: var(--space-sm); }
+.pf-field input, .pf-field select { max-width: 100%; }
+.pf-field .dd { max-width: 100%; }
 .pf-wide { grid-column: 1 / -1; }
 @media (min-width: 900px) {
   .pf-models {
@@ -959,6 +965,92 @@ input:disabled, select:disabled { opacity: 0.5; cursor: not-allowed; }
   50% { opacity: 0.35; }
 }
 
+/* ── Resume existing job ─────────────────────────────────────────── */
+.resume-job-block {
+  margin-bottom: var(--space-md);
+}
+.resume-job-block label {
+  display: block;
+  margin-bottom: 6px;
+}
+.resume-job-block select {
+  width: 100%;
+}
+.resume-job-actions {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: var(--space-sm);
+}
+
+/* ── Disk → OPFS import dialog ──────────────────────────────────── */
+.import-dialog {
+  width: min(760px, calc(100vw - 32px));
+  max-height: min(80vh, 720px);
+  padding: 0;
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-card);
+  background: var(--surface);
+  color: var(--body);
+  box-shadow: var(--shadow-pop);
+}
+.import-dialog::backdrop {
+  background: rgba(15, 23, 42, 0.45);
+}
+.import-dialog-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-md);
+  padding: 20px 22px 14px;
+  border-bottom: 1px solid var(--hairline);
+}
+.import-dialog-head h3 {
+  margin: 0 0 4px;
+  font-size: 16px;
+  color: var(--ink);
+}
+.import-dialog-head .field-hint {
+  margin: 0;
+}
+.import-job-list {
+  max-height: 48vh;
+  overflow: auto;
+  padding: 4px 22px;
+}
+.import-job-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-md);
+  padding: 12px 0;
+  border-bottom: 1px solid var(--hairline-soft);
+}
+.import-job-row:last-child {
+  border-bottom: 0;
+}
+.import-job-name {
+  font-family: var(--font-code);
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ink);
+}
+.import-job-meta {
+  margin-top: 2px;
+  font-size: 12px;
+  color: var(--muted);
+}
+.import-empty {
+  padding: 28px 0;
+  font-size: 13px;
+  color: var(--muted);
+}
+.import-status {
+  min-height: 20px;
+  padding: 10px 22px 16px;
+  font-size: 12px;
+  color: var(--muted);
+}
+
 /* ── Dropzone ───────────────────────────────────────────────────── */
 .file-input-zone {
   border: 1.5px dashed var(--hairline-strong);
@@ -977,6 +1069,11 @@ input:disabled, select:disabled { opacity: 0.5; cursor: not-allowed; }
 .file-input-zone:focus-visible {
   outline: 2px solid var(--primary);
   outline-offset: 2px;
+}
+.file-input-zone.disabled {
+  opacity: 0.45;
+  pointer-events: none;
+  cursor: not-allowed;
 }
 .zone-icon {
   color: var(--muted-soft);

@@ -1,8 +1,9 @@
 import { Pdf2Skill, validateConfig } from '@pdf2skill/sdk';
 import type { ProviderConfig } from '@pdf2skill/sdk';
 import { fetchModels, getKeys, getProviders, setKey, syncProviders } from '../api/backend';
+import { enhanceModelInputs } from '../ui/combobox';
 import { $, checked, escapeHtml, errInfoOf, setChecked, setVal, showToast, val } from '../ui/dom';
-import { syncSelect } from '../ui/dropdown';
+import { enhanceSelects, syncSelect } from '../ui/dropdown';
 
 const STAGES: {
   selId: string;
@@ -15,6 +16,43 @@ const STAGES: {
   { selId: 'skill-provider', stageKey: 'skill_engine', routerKey: 'skillEngine', displayId: 'skill-model-display' },
 ];
 const MODEL_KEYS = ['chunking_model', 'peeling_model', 'skill_engine_model'] as const;
+const EFFORT_KEYS = {
+  chunking_model: 'chunking_reasoning_effort',
+  peeling_model: 'peeling_reasoning_effort',
+  skill_engine_model: 'skill_engine_reasoning_effort',
+} as const;
+const REASONING_KEYS = [
+  'chunking_reasoning_effort',
+  'peeling_reasoning_effort',
+  'skill_engine_reasoning_effort',
+] as const;
+
+// OpenAI Chat Completions reasoning_effort presets. Which levels a model
+// accepts varies by model/provider; the empty value omits the field.
+const EFFORT_OPTIONS: { value: string; label: string }[] = [
+  { value: '', label: '默认（不发送）' },
+  { value: 'none', label: 'none · 关闭' },
+  { value: 'minimal', label: 'minimal · 最少' },
+  { value: 'low', label: 'low · 低' },
+  { value: 'medium', label: 'medium · 中' },
+  { value: 'high', label: 'high · 高' },
+  { value: 'xhigh', label: 'xhigh · 很高' },
+  { value: 'max', label: 'max · 最高' },
+];
+
+function effortOptionsHtml(current: string): string {
+  const custom =
+    current && !EFFORT_OPTIONS.some((o) => o.value === current)
+      ? `<option value="${escapeHtml(current)}" selected>${escapeHtml(current)}（自定义）</option>`
+      : '';
+  return (
+    custom +
+    EFFORT_OPTIONS.map(
+      (o) =>
+        `<option value="${o.value}"${o.value === current ? ' selected' : ''}>${escapeHtml(o.label)}</option>`,
+    ).join('')
+  );
+}
 
 let mineruMode: 'local' | 'remote' = 'local';
 const modelCache = new Map<string, string[]>();
@@ -56,12 +94,17 @@ function renderProviderRows(): void {
       const badge = info.api_key_set
         ? `<span class="key-badge key-set"><i class="ph ph-check"></i>${escapeHtml(info.api_key_preview || '已设置')}</span>`
         : `<span class="key-badge key-missing"><i class="ph ph-x"></i>未设置 Key</span>`;
-      const modelFields = MODEL_KEYS.map(
-        (k) =>
+      const modelFields = MODEL_KEYS.map((k) => {
+        const effortKey = EFFORT_KEYS[k];
+        return (
           `<div class="pf-field"><label>${escapeHtml(k.replace('_model', ''))} 模型</label>` +
           `<input type="text" data-field="${k}" list="dl-${escapeHtml(name)}-${k}" value="${escapeHtml(cfg[k] || '')}" placeholder="未配置">` +
-          `<datalist id="dl-${escapeHtml(name)}-${k}"></datalist></div>`,
-      ).join('');
+          `<datalist id="dl-${escapeHtml(name)}-${k}"></datalist>` +
+          `<label class="pf-sub-label" for="eff-${escapeHtml(name)}-${k}">思考强度</label>` +
+          `<select id="eff-${escapeHtml(name)}-${k}" data-field="${effortKey}" title="OpenAI Chat Completions reasoning_effort；不同模型支持的档位不同">` +
+          `${effortOptionsHtml(cfg[effortKey] || '')}</select></div>`
+        );
+      }).join('');
       return `
     <div class="provider-row" data-provider="${escapeHtml(name)}">
       <div class="provider-head">
@@ -91,6 +134,8 @@ function renderProviderRows(): void {
   });
 
   for (const [name, models] of modelCache) renderDatalists(name, models);
+  enhanceModelInputs(container);
+  enhanceSelects(container);
 }
 
 function renderDatalists(providerName: string, models: string[]): void {
@@ -359,9 +404,11 @@ function gatherProvidersFromUI(): Record<string, Record<string, string>> {
   document.querySelectorAll<HTMLElement>('.provider-row').forEach((row) => {
     const name = row.dataset.provider!;
     providers[name] = {};
-    row.querySelectorAll<HTMLInputElement>('input[data-field]').forEach((inp) => {
-      providers[name][inp.dataset.field!] = inp.value.trim();
-    });
+    row
+      .querySelectorAll<HTMLInputElement | HTMLSelectElement>('input[data-field], select[data-field]')
+      .forEach((inp) => {
+        providers[name][inp.dataset.field!] = inp.value.trim();
+      });
   });
   return providers;
 }
@@ -372,7 +419,7 @@ function toProviderConfig(fields: Record<string, string>): ProviderConfig {
     base_url: fields.base_url || '',
     api_key_env: fields.api_key_env || '',
   };
-  for (const k of ['chunking_model', 'peeling_model', 'skill_engine_model'] as const) {
+  for (const k of [...MODEL_KEYS, ...REASONING_KEYS]) {
     const v = fields[k];
     if (v) cfg[k] = v;
   }

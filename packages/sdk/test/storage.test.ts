@@ -54,6 +54,21 @@ describe('CheckpointManager', () => {
     await ckpt.load();
     expect(ckpt.isStageCompleted('pdf_conversion')).toBe(false);
   });
+
+  it('resets when the JSON structure is incomplete', async () => {
+    const root = mockOpfsRoot();
+    const dir = await root.getDirectoryHandle('job7', { create: true });
+    await writeText(
+      dir,
+      '.checkpoint.json',
+      JSON.stringify({ version: 1, completed_stages: null }),
+    );
+    const ckpt = new CheckpointManager(dir);
+    await ckpt.load();
+    expect(ckpt.isStageCompleted('pdf_conversion')).toBe(false);
+    await ckpt.markStageCompleted('pdf_conversion');
+    expect(ckpt.isStageCompleted('pdf_conversion')).toBe(true);
+  });
 });
 
 describe('dirExists', () => {

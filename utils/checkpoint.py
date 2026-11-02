@@ -31,10 +31,15 @@ class CheckpointManager:
             try:
                 with open(self.checkpoint_file, 'r', encoding='utf-8') as f:
                     data = json.load(f)
-                if data.get("version") != CHECKPOINT_VERSION:
+                if (
+                    not isinstance(data, dict)
+                    or data.get("version") != CHECKPOINT_VERSION
+                    or not isinstance(data.get("completed_stages"), list)
+                    or not isinstance(data.get("data"), dict)
+                ):
                     logger.warning(
-                        f"Checkpoint version mismatch (expected {CHECKPOINT_VERSION}, "
-                        f"got {data.get('version')}). Resetting checkpoint."
+                        f"Checkpoint invalid or version mismatch (expected {CHECKPOINT_VERSION}). "
+                        "Resetting checkpoint."
                     )
                     return {"version": CHECKPOINT_VERSION, "completed_stages": [], "data": {}}
                 return data

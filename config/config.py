@@ -101,7 +101,11 @@ class Config:
         providers = self._config.get('llm', {}).get('providers', {})
         for provider_name in providers:
             provider_upper = provider_name.upper().replace('-', '_')
-            for field in ['base_url', 'api_key_env', 'chunking_model', 'peeling_model', 'skill_engine_model']:
+            for field in [
+                'base_url', 'api_key_env',
+                'chunking_model', 'peeling_model', 'skill_engine_model',
+                'chunking_reasoning_effort', 'peeling_reasoning_effort', 'skill_engine_reasoning_effort',
+            ]:
                 env_key = f"{provider_upper}_{field.upper()}"
                 if env_key in os.environ:
                     providers[provider_name][field] = os.environ[env_key]
