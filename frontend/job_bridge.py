@@ -39,7 +39,7 @@ INCLUDE_DIRS = {
     "peeling_cache",
 }
 
-MAX_BUNDLE_BYTES = 1_500 * 1024 * 1024
+MAX_BUNDLE_BYTES = 512 * 1024 * 1024
 
 router = APIRouter()
 
@@ -51,12 +51,16 @@ def _error(status: int, code: str, message: str, advice: str = "") -> JSONRespon
     )
 
 
+def _busy_error() -> JSONResponse:
+    return _error(409, "JOB_BUSY", "任务正在被写入或文件已变化，请稍后重试")
+
+
 def _find_job(job_id: str) -> Path | None:
     """Resolve an exact, single-segment job directory under OUTPUTS_ROOT.
 
-    The directory must already exist and must not be a symlink; constructing
-    the path from user input is safe only because it has to match an entry in
-    the outputs root and cannot contain separators.
+    The directory must already exist and must not resolve outside the outputs
+    root. ``Path.is_symlink()`` alone misses Windows junctions, so containment
+    is checked on the resolved path.
     """
     if not job_id or job_id in (".", "..") or "/" in job_id or "\\" in job_id:
         return None
@@ -102,9 +106,25 @@ def _markdown_name(job: Path, checkpoint: dict) -> str | None:
     return name
 
 
+def _skill_complete(job: Path) -> bool:
+    skill_dir = job / "generated_skills"
+    if not (skill_dir / "SKILL.md").is_file():
+        return False
+    checkpoint_path = skill_dir / ".checkpoint.json"
+    try:
+        data = json.loads(checkpoint_path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+        return False
+    return (
+        isinstance(data, dict)
+        and isinstance(data.get("completed_stages"), list)
+        and "skill_name" in data["completed_stages"]
+    )
+
+
 def _stages(job: Path, checkpoint: dict) -> list[str]:
     stages = [s for s in STAGE_ORDER if s in checkpoint["completed_stages"]]
-    if (job / "generated_skills" / "SKILL.md").is_file():
+    if _skill_complete(job) and "skill_generation" not in stages:
         stages.append("skill_generation")
     return stages
 
@@ -122,23 +142,29 @@ def _allowed_dir(rel: Path) -> bool:
     return bool(rel.parts) and rel.parts[0] in INCLUDE_DIRS
 
 
+def _inside(path: Path, root: Path) -> bool:
+    try:
+        return path.resolve().is_relative_to(root)
+    except OSError:
+        return False
+
+
 def _iter_bundle_files(job: Path) -> Iterator[tuple[Path, Path]]:
-    for raw_root, dirs, files in os.walk(job, followlinks=False):
-        root = Path(raw_root)
+    root = job.resolve()
+    for raw_root, dirs, files in os.walk(root, followlinks=False):
+        base = Path(raw_root)
         keep = []
         for name in sorted(dirs):
-            path = root / name
-            rel = path.relative_to(job)
-            if not path.is_symlink() and _allowed_dir(rel):
+            path = base / name
+            rel = path.relative_to(root)
+            if _allowed_dir(rel) and _inside(path, root):
                 keep.append(name)
         dirs[:] = keep
 
         for name in sorted(files):
-            path = root / name
-            if path.is_symlink() or not path.is_file():
-                continue
-            rel = path.relative_to(job)
-            if _allowed_rel(rel):
+            path = base / name
+            rel = path.relative_to(root)
+            if _allowed_rel(rel) and _inside(path, root) and path.is_file():
                 yield path, rel
 
 
@@ -154,22 +180,26 @@ def list_disk_jobs() -> JSONResponse:
     jobs = []
     if OUTPUTS_ROOT.is_dir():
         for entry in sorted(OUTPUTS_ROOT.iterdir(), key=lambda p: p.name):
-            if entry.is_symlink() or not entry.is_dir() or entry.name.startswith("."):
+            job = _find_job(entry.name)
+            if job is None:
                 continue
-            checkpoint = _read_checkpoint(entry)
+            checkpoint = _read_checkpoint(job)
             if checkpoint is None:
                 continue
-            md_name = _markdown_name(entry, checkpoint)
+            md_name = _markdown_name(job, checkpoint)
             if md_name is None:
                 continue
-            checkpoint_path = entry / ".checkpoint.json"
+            try:
+                updated_at = int((job / ".checkpoint.json").stat().st_mtime * 1000)
+            except OSError:
+                updated_at = 0
             jobs.append(
                 {
-                    "jobId": entry.name,
-                    "inputName": entry.name,
-                    "completedStages": _stages(entry, checkpoint),
+                    "jobId": job.name,
+                    "inputName": job.name,
+                    "completedStages": _stages(job, checkpoint),
                     "resumable": True,
-                    "updatedAt": int(checkpoint_path.stat().st_mtime * 1000),
+                    "updatedAt": updated_at,
                     "mdFile": md_name,
                 }
             )
@@ -190,8 +220,14 @@ def download_job_bundle(job_id: str):
     if _markdown_name(job, checkpoint) is None:
         return _error(409, "JOB_NOT_RESUMABLE", "任务缺少 Stage 1 Markdown，无法导入续跑")
 
-    files = list(_iter_bundle_files(job))
-    total = sum(path.stat().st_size for path, _ in files)
+    checkpoint_path = job / ".checkpoint.json"
+    try:
+        checkpoint_stat = checkpoint_path.stat()
+        files = list(_iter_bundle_files(job))
+        total = sum(path.stat().st_size for path, _ in files)
+    except OSError:
+        return _busy_error()
+
     if total > MAX_BUNDLE_BYTES:
         return _error(
             413,
@@ -206,9 +242,17 @@ def download_job_bundle(job_id: str):
         with zipfile.ZipFile(tmp_name, "w", zipfile.ZIP_DEFLATED, compresslevel=6) as zf:
             for path, rel in files:
                 zf.write(path, rel.as_posix())
+        after = checkpoint_path.stat()
+    except OSError:
+        _cleanup(tmp_name)
+        return _busy_error()
     except Exception:
         _cleanup(tmp_name)
         raise
+
+    if (after.st_mtime_ns, after.st_size) != (checkpoint_stat.st_mtime_ns, checkpoint_stat.st_size):
+        _cleanup(tmp_name)
+        return _busy_error()
 
     return FileResponse(
         tmp_name,

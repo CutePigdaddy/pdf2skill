@@ -98,7 +98,9 @@ python frontend/server.py
 
 新版工作台的「运行」页可直接选择当前浏览器 OPFS 中已完成 Stage 1 的任务继续，无需重新上传原文件；「输出」页也提供「继续任务」入口。浏览器任务按 origin 隔离（`127.0.0.1:8501`、`localhost:8501`、`5173` 各自独立）。
 
-CLI 写在项目根目录 `outputs/` 的任务不会自动出现在浏览器列表里，但可以在「运行」页点「从磁盘导入任务」：服务端 `GET /api/jobs` 列出可续跑的磁盘任务，`GET /api/jobs/{id}/bundle` 打包 checkpoint、`full.md`、图片、分块与技能文件，浏览器解压写入 OPFS 后即可按原有阶段数继续。打包会排除 `splits/`、MinerU 分段目录与原始 zip（Stage 1 已完成，不需要它们）。
+CLI 写在项目根目录 `outputs/` 的任务不会自动出现在浏览器列表里，但可以在「运行」页点「从磁盘导入任务」：服务端 `GET /api/jobs` 列出可续跑的磁盘任务，`GET /api/jobs/{id}/bundle` 打包 checkpoint、`full.md`、图片、分块与技能文件，浏览器解压写入 OPFS 后即可按原有阶段数继续。打包会排除 `splits/`、MinerU 分段目录与原始 zip（Stage 1 已完成，不需要它们）。同名任务不会被覆盖，需先在「输出」页删除旧任务。
+
+「运行」页日志默认只显示阶段与关键状态，带时间戳和级别；勾选「详细」可展开逐 chunk、锚点与缓存日志，日志最多保留 500 行。
 
 ## 纯前端模式（SDK + 演示界面）
 
@@ -153,7 +155,9 @@ const result = await pdf2skill.run({
 // 任务管理 / 输出浏览 / 导出
 const jobs = await pdf2skill.listJobs(); // completedStages + resumable
 const tree = await pdf2skill.listOutputTree(jobs[0].jobId);
-const zip = await pdf2skill.exportZip(jobs[0].jobId); // Blob，可直接触发下载
+const zip = await pdf2skill.exportZip(jobs[0].jobId); // 整包输出 zip（保留 outputs/ 布局）
+const skill = await pdf2skill.exportSkillZip(jobs[0].jobId); // { blob, skillName }
+// skill.blob 下载文件名使用 SKILL.md 的 name；压缩包根目录直接是 SKILL.md + references/
 
 // 不重新上传原文件，直接从已有任务的 checkpoint 继续
 if (jobs[0].resumable) {
@@ -174,7 +178,7 @@ SDK 通过同源后端 `/api/llm/chat` 与 `/api/mineru/*` 调用 LLM 与 MinerU
 ### SDK 测试
 
 ```bash
-npm test   # vitest，162 个用例（分块 / 剥离与缓存 / 技能生成 / 流水线 / 任务导入 / 门面 / 命名校验 / 与 Python 录制回放逐字节对齐）
+npm test   # vitest，167 个用例（分块 / 剥离与缓存 / 技能生成 / 流水线 / 任务导入 / 双 zip 导出 / 门面 / 命名校验 / 与 Python 录制回放逐字节对齐）
 ```
 
 ## 配置
@@ -338,7 +342,7 @@ packages/
       stages/            # llmChunker / treeMerger / peelCache / skillEngine
       mineru/            # MinerU 客户端 + zip 解压（经代理）
       storage/           # OPFS 封装 + checkpoint + importJob（磁盘任务导入）
-      export/zip.ts      # zip 导出
+      export/zip.ts      # 整包 zip + 按 SKILL.md name 打包的 Skill zip
     test/                # vitest 单测 + 与 Python 的录制回放对齐测试
   app/                   # @pdf2skill/app：纯前端演示界面（Vite + TS，4 Tab）
 utils/
@@ -353,10 +357,10 @@ tests/                   # pytest 测试（testpaths 已限定在此目录）
 ## 测试
 
 ```bash
-# Python 单元测试（88 passed，核心逻辑 + 代理安全 + 任务桥接 + 回归）
+# Python 单元测试（89 passed，核心逻辑 + 代理安全 + 任务桥接 + 回归）
 python -m pytest tests -q
 
-# SDK 单元测试（162 个用例，vitest）
+# SDK 单元测试（167 个用例，vitest）
 npm test
 
 # 手工脚本（非 pytest 用例，需配置 .env，会调用真实 API）

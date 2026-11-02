@@ -108,7 +108,7 @@
         <ul>
           <li><code>full.md</code>：Stage 1 解析结果；<code>full_chunks_original/</code>、<code>full_chunks/</code>：分块与树结构（<code>chunks_index.json</code>、<code>tree.json</code>）。</li>
           <li><code>generated_skills/</code>：最终技能库，含 <code>SKILL.md</code> 主索引与 <code>references/</code> 分块文件。</li>
-          <li>在「输出」面板点击文件预览内容，可一键下载 zip（目录结构与命令行版 <code>outputs/&lt;书名&gt;/</code> 一致）。</li>
+          <li>在「输出」面板点击文件预览内容；可下载保留完整目录结构的整包 zip，或下载以 <code>SKILL.md</code> 的 <code>name</code> 命名、解压后直接是 <code>SKILL.md</code> + <code>references/</code> 的 Skill zip。</li>
         </ul>
       </div>
       <div class="step-goto"><button class="btn btn-secondary btn-sm" data-goto="outputs">前往查看输出<i class="ph ph-arrow-right"></i></button></div>
@@ -440,7 +440,7 @@
   <aside class="status-rail" aria-label="任务状态">
     <div class="rail-head">
       <span class="rail-title">任务状态</span>
-      <span id="run-status"></span>
+      <span id="run-status" role="status" aria-live="polite"></span>
     </div>
     <div class="rail-empty">
       <i class="ph ph-pulse"></i>
@@ -484,14 +484,20 @@
   </div>
 
   <!-- ── Pipeline Error Card ───────────────────────────────────── -->
-  <div class="mineru-error-card" id="mineru-error">
+  <div class="mineru-error-card" id="mineru-error" role="alert">
     <div class="mineru-error-title"><i class="ph ph-warning"></i>流水线错误</div>
     <div class="mineru-error-code" id="mineru-error-code"></div>
     <div class="mineru-error-advice" id="mineru-error-advice"></div>
   </div>
 
-  <h3 class="mt-lg">运行日志</h3>
-  <div class="log-box" id="log-box">
+  <div class="log-head mt-lg">
+    <h3>运行日志</h3>
+    <label class="log-detail-toggle" title="显示逐 chunk、锚点与缓存等调试细节">
+      <input type="checkbox" id="log-detail-toggle"> 详细
+    </label>
+    <button class="btn btn-ghost btn-sm" id="btn-clear-log" type="button"><i class="ph ph-trash"></i>清空</button>
+  </div>
+  <div class="log-box" id="log-box" role="log" aria-live="polite" aria-relevant="additions" aria-label="运行日志">
     <div class="log-placeholder">
       <div class="log-placeholder-icon"><i class="ph ph-terminal-window"></i></div>
       选择文件并点击「开始运行」
@@ -502,13 +508,14 @@
 <!-- ═══ Outputs Panel ═══ -->
 <div class="panel" id="panel-outputs">
   <h2>输出浏览</h2>
-  <p class="subtitle">浏览浏览器 OPFS 中的任务输出，点击文件名预览内容，可下载 zip 或删除任务。</p>
+  <p class="subtitle">浏览浏览器 OPFS 中的任务输出，点击文件名预览内容，可下载整包 zip、按技能名打包的 Skill zip，或删除任务。</p>
 
   <div class="outputs-header">
     <div class="btn-bar">
       <select class="job-select" id="job-select"><option value="">选择任务…</option></select>
       <button class="btn btn-ghost btn-sm" id="btn-resume-job" disabled><i class="ph ph-play"></i>继续任务</button>
-      <button class="btn btn-primary btn-sm" id="btn-download-zip"><i class="ph ph-download-simple"></i>下载 zip</button>
+      <button class="btn btn-primary btn-sm" id="btn-download-skill-zip"><i class="ph ph-package"></i>下载 Skill zip</button>
+      <button class="btn btn-secondary btn-sm" id="btn-download-zip"><i class="ph ph-download-simple"></i>下载整包 zip</button>
       <button class="btn btn-danger btn-sm" id="btn-delete-job"><i class="ph ph-trash"></i>删除任务</button>
     </div>
     <div class="outputs-right">

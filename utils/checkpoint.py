@@ -43,8 +43,16 @@ class CheckpointManager:
                     )
                     return {"version": CHECKPOINT_VERSION, "completed_stages": [], "data": {}}
                 return data
-            except (json.JSONDecodeError, Exception) as e:
-                logger.warning(f"Failed to load checkpoint: {e}. Resetting.")
+            except (json.JSONDecodeError, UnicodeDecodeError) as e:
+                logger.warning(f"Failed to parse checkpoint: {e}. Resetting.")
+            except OSError as e:
+                # AV scanners / Windows file locks are transient; silently
+                # resetting would make the next save() overwrite a valid
+                # checkpoint and lose completed stages.
+                logger.error(f"Failed to read checkpoint due to an I/O error: {e}")
+                raise RuntimeError(
+                    f"无法读取 checkpoint（{self.checkpoint_file}）：{e}"
+                ) from e
         return {"version": CHECKPOINT_VERSION, "completed_stages": [], "data": {}}
 
     def save(self):

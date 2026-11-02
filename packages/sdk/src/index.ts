@@ -12,10 +12,12 @@ export type {
   RunResult,
   JobMeta,
   JobSummary,
+  SkillZipResult,
   OutputTreeNode,
   OutputFile,
   StageEvent,
   LogEvent,
+  LogKind,
   Pdf2SkillEvents,
   StageName,
   ResettableStage,
@@ -48,7 +50,7 @@ export { SkillEngine } from './stages/skillEngine';
 export type { SkillEngineOptions } from './stages/skillEngine';
 export { runPipeline } from './pipeline';
 export type { PipelineInput, RunPipelineOptions, PipelineResult } from './pipeline';
-export { exportJobZip } from './export/zip';
+export { exportJobZip, exportSkillZipBundle, parseSkillName } from './export/zip';
 export { Pdf2Skill } from './pdf2skill';
 export type { Pdf2SkillOptions, ImportJobOptions } from './pdf2skill';
 export const VERSION = '0.1.0';

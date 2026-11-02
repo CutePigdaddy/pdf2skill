@@ -115,7 +115,7 @@ describe('runPipeline (markdown input)', () => {
     const { jobRoot, input } = mdInput();
     const llm = makeLlm();
     const events: { stage: string; status: string }[] = [];
-    const logs: string[] = [];
+    const logs: { message: string; kind?: string }[] = [];
 
     const result: PipelineResult = await runPipeline({
       jobRoot,
@@ -128,7 +128,8 @@ describe('runPipeline (markdown input)', () => {
             const p = payload as { stage: string; status: string };
             events.push({ stage: p.stage, status: p.status });
           } else if (event === 'log') {
-            logs.push((payload as { message: string }).message);
+            const p = payload as { message: string; kind?: string };
+            logs.push({ message: p.message, kind: p.kind });
           }
         },
       } as never,
@@ -164,6 +165,11 @@ describe('runPipeline (markdown input)', () => {
       expect(events.filter((e) => e.stage === s && e.status === 'active').length).toBeGreaterThan(0);
       expect(events.filter((e) => e.stage === s && e.status === 'done').length).toBe(1);
     }
+
+    // Logs carry UI hints: stage headers are dividers, stage internals are
+    // verbose detail hidden by default in the workbench.
+    expect(logs.find((l) => l.message === 'Stage 3 · Peeling')?.kind).toBe('stage');
+    expect(logs.some((l) => l.kind === 'detail')).toBe(true);
   });
 
   it('Stage 2 fallback does not write a checkpoint', async () => {

@@ -61,7 +61,7 @@ export interface TreeMergerOptions {
   /** Progress callback: base-chunk index (1-based) / total. */
   onProgress?: (idx: number, total: number, chunkId: string, cached?: boolean) => void;
   /** Log sink for warnings/info (defaults to console). */
-  log?: (msg: string) => void;
+  log?: (msg: string, level?: 'info' | 'warn') => void;
   /** Optional directory for per-subtree peel results (jobRoot/peeling_cache). */
   cacheDir?: FileSystemDirectoryHandle;
 }
@@ -103,7 +103,7 @@ export class TreeMerger {
     chunkId: string,
     cached?: boolean,
   ) => void;
-  private readonly logFn: (msg: string) => void;
+  private readonly logFn: (msg: string, level?: 'info' | 'warn') => void;
   private readonly cacheDir?: FileSystemDirectoryHandle;
 
   constructor(llm: LlmTransport, opts: TreeMergerOptions | Partial<TreeMergerConfig> = {}) {
@@ -112,11 +112,11 @@ export class TreeMerger {
       const o = opts as TreeMergerOptions;
       this.config = { ...DEFAULT_TREE_MERGER_CONFIG, ...o.config };
       this.onProgress = o.onProgress;
-      this.logFn = o.log ?? console.log;
+      this.logFn = o.log ?? ((msg, level) => (level === 'warn' ? console.warn(msg) : console.log(msg)));
       this.cacheDir = o.cacheDir;
     } else {
       this.config = { ...DEFAULT_TREE_MERGER_CONFIG, ...(opts as Partial<TreeMergerConfig>) };
-      this.logFn = console.log;
+      this.logFn = (msg, level) => (level === 'warn' ? console.warn(msg) : console.log(msg));
     }
     this.llm = llm;
   }
@@ -142,7 +142,7 @@ export class TreeMerger {
       await savePeelCache(this.cacheDir, cacheKey, chunk.toDict());
       this.cacheWrites += 1;
     } catch (e) {
-      this.logFn(`    Cache write failed for ${chunk.id}: ${e}`);
+      this.logFn(`    Cache write failed for ${chunk.id}: ${e}`, 'warn');
     }
   }
 
@@ -271,15 +271,23 @@ export class TreeMerger {
     const errorsBefore = this.peelErrors;
     let cacheKey: string | null = null;
     if (this.cacheDir) {
-      cacheKey = await peelCacheKey({
-        content: chunk.content,
-        title: chunk.title,
-        parentPath: chunk.parentPath,
-        startLine: chunk.startLine,
-        endLine: chunk.endLine,
-        iteration: currentIteration,
-        config: this.config,
-      });
+      try {
+        cacheKey = await peelCacheKey({
+          content: chunk.content,
+          title: chunk.title,
+          parentPath: chunk.parentPath,
+          startLine: chunk.startLine,
+          endLine: chunk.endLine,
+          iteration: currentIteration,
+          config: this.config,
+        });
+      } catch {
+        // crypto.subtle is unavailable on insecure origins (e.g. LAN HTTP).
+        // Peeling must still work; it just runs without cache reuse.
+        cacheKey = null;
+      }
+    }
+    if (this.cacheDir && cacheKey) {
       const cached = await loadPeelCache(this.cacheDir, cacheKey);
       if (cached) {
         try {
@@ -293,7 +301,7 @@ export class TreeMerger {
       }
     }
 
-    console.log(
+    console.debug(
       `  Peeling ${chunk.id} (iteration ${currentIteration}, ~${fmt(estimatedTokens)} tokens)...`,
     );
 
@@ -303,7 +311,7 @@ export class TreeMerger {
     try {
       const response = await this.llm.chat(prompt);
       if (!response || !response.trim()) {
-        this.logFn(`    Empty response from LLM for ${chunk.id}`);
+        this.logFn(`    Empty response from LLM for ${chunk.id}`, 'warn');
         this.peelErrors += 1;
         return [chunk];
       }
@@ -331,7 +339,7 @@ export class TreeMerger {
       if ((e as Error).name === 'AbortError') throw e;
       const code = (e as { code?: string }).code;
       if (code && code !== 'LLM_PARSE' && code !== 'LLM_TIMEOUT') throw e;
-      this.logFn(`    Could not parse LLM response: ${e}`);
+      this.logFn(`    Could not parse LLM response: ${e}`, 'warn');
       this.peelErrors += 1;
       return [chunk];
     }
@@ -350,11 +358,8 @@ export class TreeMerger {
       if (pos > 0) {
         splitPositions.push(pos);
         suggestedTitles.push(((anchorInfo.suggested_title as string) ?? '') || null);
-        this.logFn(
-          `    Found anchor at position ${pos}: '${anchorText.slice(0, 30)}...'`,
-        );
       } else {
-        this.logFn(`    Could not find anchor: '${anchorText.slice(0, 30)}...'`);
+        this.logFn(`    Could not find anchor: '${anchorText.slice(0, 30)}...'`, 'warn');
       }
     }
 
@@ -380,6 +385,7 @@ export class TreeMerger {
       await this.persistPeelCache(cacheKey, chunk, errorsBefore);
       return [chunk];
     }
+    this.logFn(`  [Split] ${chunk.id} → ${sortedPositions.length - 1} parts`);
 
     const rawChildChunks: Array<{ content: string; title: string }> = [];
     for (let i = 0; i < sortedPositions.length - 1; i++) {

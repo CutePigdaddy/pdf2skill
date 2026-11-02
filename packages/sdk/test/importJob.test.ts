@@ -80,14 +80,13 @@ describe('importJobBundle', () => {
     expect(await getDir(jobRoot, 'splits')).toBeNull();
   });
 
-  it('refuses silent overwrite but keeps the existing job intact', async () => {
+  it('refuses to overwrite and keeps the existing job intact', async () => {
     const root = mockOpfsRoot();
     const sdk = new Pdf2Skill({ storageRoot: root });
     const bytes = await makeBundle();
 
     await sdk.importJob('book-a', bytes);
     const jobRoot = (await getDir(root, 'jobs/book-a'))!;
-    await sdk.importJob('book-a', bytes, { overwrite: true });
 
     await expect(sdk.importJob('book-a', bytes)).rejects.toMatchObject({ code: 'JOB_EXISTS' });
     expect(await readText(jobRoot, 'full.md')).toContain('Hello world');

@@ -76,8 +76,7 @@ def index():
     return FileResponse(INDEX_FILE, headers={"Cache-Control": "no-store"})
 
 
-if (DIST_DIR / "assets").is_dir():
-    app.mount("/assets", StaticFiles(directory=str(DIST_DIR / "assets")), name="assets")
+app.mount("/assets", StaticFiles(directory=str(DIST_DIR / "assets"), check_dir=False), name="assets")
 
 # Everything else (notably /api/*) is the proxy app. Mounted last so the
 # static routes above take precedence.

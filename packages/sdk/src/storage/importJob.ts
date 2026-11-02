@@ -29,7 +29,6 @@ export interface ImportJobBundleOptions {
   jobsDir: FileSystemDirectoryHandle;
   jobId: string;
   zipBytes: Uint8Array;
-  overwrite?: boolean;
   inputName?: string;
   onProgress?: (done: number, total: number) => void;
 }
@@ -117,11 +116,11 @@ export async function importJobBundle(opts: ImportJobBundleOptions): Promise<Job
   validateJobId(opts.jobId);
 
   const existing = await getDir(opts.jobsDir, opts.jobId);
-  if (existing && !opts.overwrite) {
+  if (existing) {
     throw new Pdf2SkillError(
       'JOB_EXISTS',
       `浏览器中已存在任务 '${opts.jobId}'`,
-      '如需用磁盘版本覆盖，请确认覆盖后重试',
+      '请先在「输出」页删除同名任务，再重新导入',
     );
   }
 
@@ -179,7 +178,24 @@ export async function importJobBundle(opts: ImportJobBundleOptions): Promise<Job
     throw invalid('任务包缺少 Stage 1 Markdown 文件', '请确认 full.md / input.md 仍在 outputs/ 中');
   }
 
-  if (existing) await removeEntry(opts.jobsDir, opts.jobId);
+  // A stale SKILL.md can survive a Stage 3 rebuild; only the Stage 4
+  // checkpoint proves the skill package is current.
+  let skillComplete = false;
+  const skillCheckpoint = entries.find(
+    (e) => e.segments.join('/') === 'generated_skills/.checkpoint.json',
+  );
+  if (skillCheckpoint) {
+    try {
+      const raw = JSON.parse(await skillCheckpoint.file.async('string')) as {
+        completed_stages?: unknown;
+      };
+      skillComplete =
+        Array.isArray(raw.completed_stages) && raw.completed_stages.includes('skill_name');
+    } catch {
+      skillComplete = false;
+    }
+  }
+
   const jobRoot = await ensureDir(opts.jobsDir, opts.jobId);
 
   try {
@@ -206,7 +222,7 @@ export async function importJobBundle(opts: ImportJobBundleOptions): Promise<Job
     };
     await writeTextAtomic(jobRoot, '.checkpoint.json', JSON.stringify(checkpoint, null, 2));
 
-    if (entries.some((e) => e.segments.join('/') === 'generated_skills/SKILL.md')) {
+    if (entries.some((e) => e.segments.join('/') === 'generated_skills/SKILL.md') && skillComplete) {
       completed.add('skill_generation');
     }
 

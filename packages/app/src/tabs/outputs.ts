@@ -13,10 +13,19 @@ let currentJobId = '';
 let blobUrl: string | null = null;
 let outputsOptions: OutputsTabOptions = {};
 let resumableJobIds = new Set<string>();
+let skillReadyJobIds = new Set<string>();
+let exporting = false;
 
-function updateResumeButton(): void {
-  const btn = document.getElementById('btn-resume-job') as HTMLButtonElement | null;
-  if (btn) btn.disabled = !currentJobId || !resumableJobIds.has(currentJobId);
+function updateJobActions(): void {
+  const set = (id: string, disabled: boolean) => {
+    const btn = document.getElementById(id) as HTMLButtonElement | null;
+    if (btn) btn.disabled = disabled;
+  };
+  const hasJob = !!currentJobId;
+  set('btn-resume-job', !hasJob || !resumableJobIds.has(currentJobId));
+  set('btn-download-zip', !hasJob || exporting);
+  set('btn-download-skill-zip', !hasJob || exporting || !skillReadyJobIds.has(currentJobId));
+  set('btn-delete-job', !hasJob || exporting);
 }
 
 function fmtBytes(n: number): string {
@@ -45,6 +54,9 @@ async function refreshJobList(): Promise<void> {
   const sel = $('job-select') as HTMLSelectElement;
   const jobs = await pdf2skill.listJobs();
   resumableJobIds = new Set(jobs.filter((j) => j.resumable).map((j) => j.jobId));
+  skillReadyJobIds = new Set(
+    jobs.filter((j) => j.completedStages.includes('skill_generation')).map((j) => j.jobId),
+  );
   const prev = currentJobId;
   sel.innerHTML = '<option value="">选择任务…</option>' + jobs
     .map((j: JobMeta) => {
@@ -56,7 +68,7 @@ async function refreshJobList(): Promise<void> {
   if (prev && jobs.some((j) => j.jobId === prev)) sel.value = prev;
   currentJobId = sel.value;
   syncSelect(sel);
-  updateResumeButton();
+  updateJobActions();
 }
 
 // ── Tree rendering ────────────────────────────────────────────────
@@ -103,7 +115,14 @@ const EMPTY_STATE = `
 
 async function loadTree(): Promise<void> {
   const treeEl = $('output-tree');
+  const viewer = $('file-viewer');
   treeEl.innerHTML = '';
+  viewer.style.display = 'none';
+  viewer.textContent = '';
+  if (blobUrl) {
+    URL.revokeObjectURL(blobUrl);
+    blobUrl = null;
+  }
   if (!currentJobId) {
     treeEl.innerHTML = EMPTY_STATE;
     return;
@@ -130,8 +149,11 @@ async function loadTree(): Promise<void> {
 
 async function previewFile(path: string): Promise<void> {
   const viewer = $('file-viewer');
+  const jobId = currentJobId;
+  if (!jobId) return;
   try {
-    const file = await pdf2skill.readOutputFile(currentJobId, path);
+    const file = await pdf2skill.readOutputFile(jobId, path);
+    if (jobId !== currentJobId) return;
     viewer.style.display = 'block';
     if (blobUrl) {
       URL.revokeObjectURL(blobUrl);
@@ -154,22 +176,45 @@ async function previewFile(path: string): Promise<void> {
 
 // ── Zip download / delete ─────────────────────────────────────────
 
+function triggerDownload(blob: Blob, filename: string): void {
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = filename;
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 30_000);
+}
+
 async function downloadZip(): Promise<void> {
-  if (!currentJobId) {
-    showToast('请先选择任务', 'warn');
-    return;
-  }
+  if (!currentJobId || exporting) return;
+  exporting = true;
+  updateJobActions();
   try {
     const blob = await pdf2skill.exportZip(currentJobId);
-    const a = document.createElement('a');
-    a.href = URL.createObjectURL(blob);
-    a.download = `${currentJobId}.zip`;
-    a.click();
-    setTimeout(() => URL.revokeObjectURL(a.href), 30_000);
-    showToast('zip 已生成，正在下载');
+    triggerDownload(blob, `${currentJobId}.zip`);
+    showToast('整包 zip 已生成，正在下载');
   } catch (e) {
     const info = errInfoOf(e);
     showToast('下载失败: ' + info.message + (info.advice ? '：' + info.advice : ''), 'error');
+  } finally {
+    exporting = false;
+    updateJobActions();
+  }
+}
+
+async function downloadSkillZip(): Promise<void> {
+  if (!currentJobId || exporting) return;
+  exporting = true;
+  updateJobActions();
+  try {
+    const { blob, skillName } = await pdf2skill.exportSkillZip(currentJobId);
+    triggerDownload(blob, `${skillName}.zip`);
+    showToast(`Skill zip 已生成：${skillName}.zip`);
+  } catch (e) {
+    const info = errInfoOf(e);
+    showToast('下载失败: ' + info.message + (info.advice ? '：' + info.advice : ''), 'error');
+  } finally {
+    exporting = false;
+    updateJobActions();
   }
 }
 
@@ -187,6 +232,7 @@ async function deleteJob(): Promise<void> {
     await loadTree();
     await updateStorageUsage();
     $('file-viewer').style.display = 'none';
+    updateJobActions();
   } catch (e) {
     const info = errInfoOf(e);
     showToast('删除失败: ' + info.message, 'error');
@@ -203,11 +249,12 @@ export function setupOutputsTab(
   outputsOptions = options;
   ($('job-select') as HTMLSelectElement).addEventListener('change', (e) => {
     currentJobId = (e.target as HTMLSelectElement).value;
-    updateResumeButton();
+    updateJobActions();
     void loadTree();
   });
   $('btn-refresh-outputs').addEventListener('click', () => void refreshOutputs());
   $('btn-download-zip').addEventListener('click', () => void downloadZip());
+  $('btn-download-skill-zip').addEventListener('click', () => void downloadSkillZip());
   $('btn-delete-job').addEventListener('click', () => void deleteJob());
   $('btn-resume-job').addEventListener('click', () => {
     if (!currentJobId) {

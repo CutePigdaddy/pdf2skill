@@ -8,6 +8,7 @@ import type {
   RunInput,
   RunOptions,
   RunResult,
+  SkillZipResult,
   StageName,
 } from './types';
 import { Pdf2SkillError } from './errors';
@@ -17,7 +18,7 @@ import { SKILL_NAME_RULES, validateSkillName } from './naming';
 import type { LlmTransport } from './stages/llmTransport';
 import type { LlmStage } from './llm/llmClient';
 import { runPipeline } from './pipeline';
-import { exportJobZip } from './export/zip';
+import { exportJobZip, exportSkillZipBundle } from './export/zip';
 import {
   ensureDir,
   fileExists,
@@ -72,8 +73,6 @@ export interface Pdf2SkillOptions {
 }
 
 export interface ImportJobOptions {
-  /** Replace an existing browser job with the imported one. */
-  overwrite?: boolean;
   /** Display name for the job list (defaults to the job id). */
   inputName?: string;
   onProgress?: (done: number, total: number) => void;
@@ -178,7 +177,20 @@ export class Pdf2Skill {
 
   private async readJobMeta(jobRoot: FileSystemDirectoryHandle): Promise<JobMeta> {
     const raw = await readText(jobRoot, 'job.json');
-    return JSON.parse(raw) as JobMeta;
+    const data = JSON.parse(raw) as Partial<JobMeta> | null;
+    if (typeof data !== 'object' || data === null) {
+      throw new Error('job.json is not an object');
+    }
+    const stages = Array.isArray(data.completedStages)
+      ? data.completedStages.filter((s): s is StageName => STAGE_SEQUENCE.includes(s as StageName))
+      : [];
+    return {
+      jobId: typeof data.jobId === 'string' && data.jobId ? data.jobId : jobRoot.name,
+      inputName:
+        typeof data.inputName === 'string' && data.inputName ? data.inputName : jobRoot.name,
+      completedStages: stages,
+      updatedAt: typeof data.updatedAt === 'number' ? data.updatedAt : 0,
+    };
   }
 
   private async summarizeJob(
@@ -258,7 +270,6 @@ export class Pdf2Skill {
       jobsDir: jobs,
       jobId,
       zipBytes,
-      overwrite: options.overwrite,
       inputName: options.inputName,
       onProgress: options.onProgress,
     });
@@ -512,6 +523,15 @@ export class Pdf2Skill {
   async exportZip(jobId: string): Promise<Blob> {
     const jobRoot = await this.jobRoot(jobId);
     return exportJobZip(jobRoot);
+  }
+
+  /**
+   * Package `generated_skills/` as an installable skill zip: the folder is
+   * renamed to the SKILL.md `name` and nested under it in the archive.
+   */
+  async exportSkillZip(jobId: string): Promise<SkillZipResult> {
+    const jobRoot = await this.jobRoot(jobId);
+    return exportSkillZipBundle(jobRoot, jobId);
   }
 
   /** Best-effort storage usage estimate (null when unsupported). */

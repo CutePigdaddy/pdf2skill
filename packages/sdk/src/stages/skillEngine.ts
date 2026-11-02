@@ -19,7 +19,7 @@ export interface SkillEngineOptions {
   /** Progress callback for chunk tagging (idx is 1-based). */
   onProgress?: (idx: number, total: number, title: string) => void;
   /** Logger for warnings/errors (defaults to console). */
-  log?: (msg: string) => void;
+  log?: (msg: string, level?: 'info' | 'warn') => void;
 }
 
 /**
@@ -52,8 +52,14 @@ export class SkillEngine {
     };
   }
 
-  private log(msg: string): void {
-    (this.opts.log ?? console.log)(msg);
+  private log(msg: string, level: 'info' | 'warn' = 'info'): void {
+    if (this.opts.log) {
+      this.opts.log(msg, level);
+    } else if (level === 'warn') {
+      console.warn(msg);
+    } else {
+      console.log(msg);
+    }
   }
 
   /** Flatten the tree to leaf nodes (excluding master/root). */
@@ -196,7 +202,7 @@ export class SkillEngine {
           } catch (e) {
             if ((e as Error).name === 'AbortError') throw e;
             // Not written to summaries so the chunk is retried on re-run
-            this.log(`Error tagging chunk ${node.id}: ${e}`);
+            this.log(`Error tagging chunk ${node.id}: ${e}`, 'warn');
           }
         }
       }

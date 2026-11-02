@@ -1360,6 +1360,64 @@ input:disabled, select:disabled { opacity: 0.5; cursor: not-allowed; }
 }
 .log-placeholder-icon { font-size: 22px; opacity: 0.7; }
 
+.log-head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-md);
+}
+.log-head h3 { margin: 0; }
+.log-detail-toggle {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--muted);
+  cursor: pointer;
+  user-select: none;
+}
+.log-detail-toggle input {
+  width: 14px;
+  height: 14px;
+  margin: 0;
+  accent-color: var(--primary);
+}
+.log-line {
+  display: grid;
+  grid-template-columns: 58px 38px minmax(0, 1fr);
+  gap: 8px;
+  align-items: baseline;
+  padding: 1px 0;
+}
+.log-time {
+  color: var(--term-muted);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+.log-level {
+  color: var(--term-muted);
+  font-size: 10px;
+  letter-spacing: 0.04em;
+}
+.log-msg {
+  min-width: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.log-warn .log-level,
+.log-warn .log-msg { color: #fbbf24; }
+.log-error .log-level,
+.log-error .log-msg { color: #f87171; }
+.log-stage {
+  margin-top: 10px;
+  padding-top: 8px;
+  border-top: 1px solid var(--term-border);
+}
+.log-stage .log-level,
+.log-stage .log-msg { color: #93c5fd; }
+.log-stage .log-msg { font-weight: 600; }
+.log-box:not(.show-detail) .is-detail { display: none; }
+
 /* ── Outputs panel ──────────────────────────────────────────────── */
 .outputs-header {
   display: flex;

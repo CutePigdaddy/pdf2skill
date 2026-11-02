@@ -149,7 +149,7 @@ describe('Pdf2Skill facade', () => {
     await expect(sdk.listOutputTree('facade_book')).rejects.toMatchObject({ code: 'JOB_NOT_FOUND' });
   });
 
-  it('exportZip mirrors the Python outputs layout (no input file / job meta)', async () => {
+  it('exportZip keeps the markdown input and omits job meta', async () => {
     const { root, sdk } = makeSdk();
     await sdk.run({ kind: 'markdown', file: file(), name: 'facade book.md' });
     const jobRoot = await ensureDir(await ensureDir(root, 'jobs'), 'facade_book');
@@ -162,16 +162,81 @@ describe('Pdf2Skill facade', () => {
     const zip = await JSZip.loadAsync(blob);
     const paths = Object.keys(zip.files).sort();
     expect(paths).toContain('.checkpoint.json');
+    expect(paths).toContain('input.md');
     expect(paths).toContain('generated_skills/SKILL.md');
     expect(paths).toContain('generated_skills/references/chunk_0001.md');
     expect(paths).toContain('full_chunks/tree.json');
     expect(paths).toContain('full_chunks_original/chunks_index.json');
     expect(paths).not.toContain('job.json');
-    expect(paths).not.toContain('input.md');
     expect(paths.some((p) => p.startsWith('peeling_cache/'))).toBe(false);
 
     const skillMd = await zip.files['generated_skills/SKILL.md'].async('string');
     expect(skillMd).toContain('name: facade-test-book');
+  });
+
+  it('an exported markdown job can be imported again from its zip', async () => {
+    const { sdk } = makeSdk();
+    await sdk.run({ kind: 'markdown', file: file(), name: 'facade book.md' });
+
+    const blob = await sdk.exportZip('facade_book');
+    const bytes = new Uint8Array(await blob.arrayBuffer());
+    const summary = await sdk.importJob('facade_copy', bytes);
+
+    expect(summary.resumable).toBe(true);
+    expect(summary.completedStages).toContain('pdf_conversion');
+  });
+
+  it('exportSkillZip puts SKILL.md and references at the archive root', async () => {
+    const { sdk } = makeSdk();
+    await sdk.run({ kind: 'markdown', file: file(), name: 'facade book.md' });
+
+    const { blob, skillName } = await sdk.exportSkillZip('facade_book');
+
+    expect(skillName).toBe('facade-test-book');
+    const JSZip = (await import('jszip')).default;
+    const zip = await JSZip.loadAsync(blob);
+    const paths = Object.keys(zip.files).sort();
+    expect(paths).toContain('SKILL.md');
+    expect(paths).toContain('references/chunk_0001.md');
+    expect(paths.some((p) => p.startsWith('facade-test-book/'))).toBe(false);
+    expect(paths).not.toContain('.checkpoint.json');
+  });
+
+  it('exportSkillZip falls back to the job id when SKILL.md has no name', async () => {
+    const { root, sdk } = makeSdk();
+    await sdk.run({ kind: 'markdown', file: file(), name: 'facade book.md' });
+    const jobRoot = await ensureDir(await ensureDir(root, 'jobs'), 'facade_book');
+    const skillDir = await ensureDir(jobRoot, 'generated_skills');
+    await writeText(skillDir, 'SKILL.md', '---\ndescription: no name here\n---\n');
+
+    const { skillName } = await sdk.exportSkillZip('facade_book');
+
+    expect(skillName).toBe('facade-book');
+  });
+
+  it('exportSkillZip sanitizes path separators in the skill name', async () => {
+    const { root, sdk } = makeSdk();
+    await sdk.run({ kind: 'markdown', file: file(), name: 'facade book.md' });
+    const jobRoot = await ensureDir(await ensureDir(root, 'jobs'), 'facade_book');
+    const skillDir = await ensureDir(jobRoot, 'generated_skills');
+    await writeText(skillDir, 'SKILL.md', '---\nname: "../evil/skill"\n---\n');
+
+    const { skillName } = await sdk.exportSkillZip('facade_book');
+
+    expect(skillName).not.toContain('/');
+    expect(skillName).not.toContain('\\');
+    expect(skillName.startsWith('.')).toBe(false);
+  });
+
+  it('exportSkillZip requires a generated_skills/SKILL.md', async () => {
+    const { root, sdk } = makeSdk();
+    await sdk.run({ kind: 'markdown', file: file(), name: 'facade book.md' });
+    const jobRoot = await ensureDir(await ensureDir(root, 'jobs'), 'facade_book');
+    await removeEntry(jobRoot, 'generated_skills');
+
+    await expect(sdk.exportSkillZip('facade_book')).rejects.toMatchObject({
+      code: 'SKILL_NOT_FOUND',
+    });
   });
 
   it('abort mid-Stage-4 keeps summaries; resume completes without redoing them', async () => {

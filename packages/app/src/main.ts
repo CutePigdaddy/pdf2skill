@@ -7,7 +7,7 @@ import '@fontsource-variable/noto-sans-sc';
 import '@fontsource-variable/jetbrains-mono';
 import { checkHealth } from './api/backend';
 import { loadConfigUI, setupConfigTab } from './tabs/config';
-import { refreshRunJobs, resumeJob, setupRunTab } from './tabs/run';
+import { refreshRunJobs, resumeJob, scrollLogToLatest, setupRunTab } from './tabs/run';
 import { refreshOutputs, setupOutputsTab } from './tabs/outputs';
 import { enhanceSelects } from './ui/dropdown';
 
@@ -30,7 +30,10 @@ function switchTab(tabId: string, focusTab = false): void {
     p.classList.toggle('active', p.id === 'panel-' + tabId);
   });
   if (tabId === 'outputs') void refreshOutputs().catch(() => {});
-  if (tabId === 'run') void refreshRunJobs().catch(() => {});
+  if (tabId === 'run') {
+    void refreshRunJobs().catch(() => {});
+    scrollLogToLatest();
+  }
 }
 
 const tabList = document.querySelector<HTMLElement>('.tabs');

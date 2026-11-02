@@ -38,6 +38,16 @@ def make_job(
         skill_dir = job / "generated_skills"
         skill_dir.mkdir()
         (skill_dir / "SKILL.md").write_text("# Skill\n", encoding="utf-8")
+        (skill_dir / ".checkpoint.json").write_text(
+            json.dumps(
+                {
+                    "version": 1,
+                    "completed_stages": ["book_overview", "skill_name"],
+                    "data": {},
+                }
+            ),
+            encoding="utf-8",
+        )
     return job
 
 
@@ -81,6 +91,21 @@ class TestListDiskJobs:
             "tree_merging",
             "skill_generation",
         ]
+
+    def test_stale_skill_md_without_checkpoint_is_not_complete(self, env):
+        outputs, client = env
+        job = make_job(
+            outputs,
+            "stale",
+            stages=("pdf_conversion", "llm_chunking", "tree_merging"),
+        )
+        skill_dir = job / "generated_skills"
+        skill_dir.mkdir()
+        (skill_dir / "SKILL.md").write_text("# Stale skill\n", encoding="utf-8")
+
+        stages = client.get("/api/jobs").json()["jobs"][0]["completedStages"]
+
+        assert stages == ["pdf_conversion", "llm_chunking", "tree_merging"]
 
     def test_missing_outputs_dir_returns_empty(self, tmp_path, monkeypatch):
         monkeypatch.setattr(job_bridge, "OUTPUTS_ROOT", tmp_path / "nope")

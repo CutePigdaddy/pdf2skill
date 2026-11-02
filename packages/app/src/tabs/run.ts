@@ -1,5 +1,5 @@
 import { Pdf2Skill, isPdf2SkillError, validateSkillName, slugifySkillName } from '@pdf2skill/sdk';
-import type { JobSummary, ResettableStage, StageEvent } from '@pdf2skill/sdk';
+import type { JobSummary, LogKind, ResettableStage, StageEvent } from '@pdf2skill/sdk';
 import { $, escapeHtml, errInfoOf, showToast } from '../ui/dom';
 import { syncSelect } from '../ui/dropdown';
 
@@ -34,6 +34,8 @@ let running = false;
 let autoOutputName = '';
 let resumeJobId = '';
 let jobSummaries: JobSummary[] = [];
+const MAX_LOG_LINES = 500;
+let logPinned = true;
 
 // ── Stage progress ────────────────────────────────────────────────
 
@@ -80,16 +82,58 @@ function resetPipelineProgress(): void {
 
 // ── Logs & errors ─────────────────────────────────────────────────
 
-function appendLog(level: 'info' | 'warn' | 'error', message: string): void {
+const LOG_PLACEHOLDER = `
+  <div class="log-placeholder">
+    <div class="log-placeholder-icon"><i class="ph ph-terminal-window"></i></div>
+    选择文件并点击「开始运行」
+  </div>`;
+
+function resetLogBox(): void {
+  $('log-box').innerHTML = LOG_PLACEHOLDER;
+  logPinned = true;
+}
+
+function isLogNearBottom(box: HTMLElement): boolean {
+  return box.scrollHeight - box.scrollTop - box.clientHeight < 32;
+}
+
+/** Keep the log tail visible when the Run tab comes back into view. */
+export function scrollLogToLatest(): void {
   const box = $('log-box');
-  const placeholder = box.querySelector('.log-placeholder');
-  if (placeholder) placeholder.remove();
-  const line = document.createElement('div');
-  line.textContent = message;
-  if (level === 'warn') line.style.color = '#fbbf24';
-  if (level === 'error') line.style.color = '#f87171';
-  box.appendChild(line);
-  box.scrollTop = box.scrollHeight;
+  if (logPinned) box.scrollTop = box.scrollHeight;
+}
+
+function appendLog(
+  level: 'info' | 'warn' | 'error',
+  message: string,
+  kind: LogKind = 'run',
+): void {
+  const box = $('log-box');
+  box.querySelector('.log-placeholder')?.remove();
+
+  const fullText = message.replace(/\s+/g, ' ').trim();
+  let text = kind === 'stage' ? fullText.replace(/^---\s*|\s*---$/g, '') : fullText;
+  if (text.length > 360) text = text.slice(0, 357) + '…';
+
+  const row = document.createElement('div');
+  const collapsible = kind === 'detail' && level === 'info';
+  row.className = `log-line log-${level} log-${kind}${collapsible ? ' is-detail' : ''}`;
+
+  const time = document.createElement('span');
+  time.className = 'log-time';
+  time.textContent = new Date().toLocaleTimeString('zh-CN', { hour12: false });
+  const badge = document.createElement('span');
+  badge.className = 'log-level';
+  badge.textContent = kind === 'stage' ? 'STAGE' : level.toUpperCase();
+  const msg = document.createElement('span');
+  msg.className = 'log-msg';
+  msg.textContent = text;
+  if (fullText !== text) msg.title = fullText;
+
+  row.append(time, badge, msg);
+  box.appendChild(row);
+  while (box.children.length > MAX_LOG_LINES) box.firstElementChild?.remove();
+  if (logPinned && box.offsetParent !== null) box.scrollTop = box.scrollHeight;
 }
 
 function showPipelineError(code: string, message: string, advice: string): void {
@@ -172,10 +216,12 @@ function applyResumeSelection(jobId: string | null): void {
   dropzone.tabIndex = isResume ? -1 : 0;
   const upload = $('upload-input') as HTMLInputElement;
   upload.disabled = isResume;
+  $('upload-error').style.display = 'none';
   if (isResume) {
-    selectedFile = null;
-    upload.value = '';
+    // Keep the File in memory: switching back to "不使用已有任务" restores it.
     $('selected-file').style.display = 'none';
+  } else if (selectedFile) {
+    $('selected-file').style.display = '';
   }
 
   setSelectDisabled(document.getElementById('input-mode') as HTMLSelectElement, isResume);
@@ -319,9 +365,9 @@ async function importDiskJob(job: DiskJobSummary, button: HTMLButtonElement): Pr
 
     const totalBytes = Number(resp.headers.get('content-length') || 0);
     if (
-      totalBytes > 512 * 1024 * 1024 &&
+      totalBytes > 256 * 1024 * 1024 &&
       !window.confirm(
-        `任务包约 ${formatMb(totalBytes)}，导入会占用浏览器存储空间。仍要继续吗？`,
+        `任务包约 ${formatMb(totalBytes)}，导入会占用较多浏览器内存与存储空间。仍要继续吗？`,
       )
     ) {
       setImportStatus('已取消');
@@ -335,27 +381,18 @@ async function importDiskJob(job: DiskJobSummary, button: HTMLButtonElement): Pr
     });
 
     setImportStatus('正在写入浏览器 OPFS…');
-    const doImport = (overwrite: boolean) =>
-      pdf2skill.importJob(job.jobId, zipBytes, {
-        overwrite,
+    let summary: JobSummary;
+    try {
+      summary = await pdf2skill.importJob(job.jobId, zipBytes, {
         inputName: job.inputName,
         onProgress: (done, total) => setImportStatus(`导入中 ${done}/${total} 个文件`),
       });
-
-    let summary: JobSummary;
-    try {
-      summary = await doImport(false);
     } catch (e) {
-      if (!isPdf2SkillError(e) || e.code !== 'JOB_EXISTS') throw e;
-      if (
-        !window.confirm(
-          `浏览器中已存在任务「${job.jobId}」。覆盖后浏览器里的旧数据不可恢复，确定覆盖吗？`,
-        )
-      ) {
-        setImportStatus('已取消：保留了浏览器中的任务');
+      if (isPdf2SkillError(e) && e.code === 'JOB_EXISTS') {
+        setImportStatus('浏览器中已有同名任务；请先在「输出」页删除后再导入');
         return;
       }
-      summary = await doImport(true);
+      throw e;
     }
 
     setImportStatus('');
@@ -500,6 +537,7 @@ function setupDropzone(): void {
 
 function setRunning(isRunning: boolean): void {
   running = isRunning;
+  $('panel-run').setAttribute('aria-busy', String(isRunning));
   ($('btn-start') as HTMLButtonElement).disabled = isRunning;
   $('btn-stop').style.display = isRunning ? 'inline-flex' : 'none';
 }
@@ -531,7 +569,7 @@ async function startPipeline(): Promise<void> {
   }
 
   // Log box reset
-  $('log-box').innerHTML = '';
+  resetLogBox();
   hidePipelineError();
   resetPipelineProgress();
   setRunning(true);
@@ -594,6 +632,17 @@ export function setupRunTab(sdkInstance: Pdf2Skill): void {
   setRestartOptions(true);
   void refreshRunJobs();
 
+  const box = $('log-box');
+  const detailToggle = $('log-detail-toggle') as HTMLInputElement;
+  box.addEventListener('scroll', () => {
+    logPinned = isLogNearBottom(box);
+  });
+  detailToggle.addEventListener('change', () => {
+    box.classList.toggle('show-detail', detailToggle.checked);
+    if (detailToggle.checked) scrollLogToLatest();
+  });
+  $('btn-clear-log').addEventListener('click', resetLogBox);
+
   $('btn-import-job').addEventListener('click', () => void openImportDialog());
   $('btn-import-close').addEventListener('click', () => {
     if (!importing) ($('import-dialog') as HTMLDialogElement).close();
@@ -603,7 +652,7 @@ export function setupRunTab(sdkInstance: Pdf2Skill): void {
   });
 
   pdf2skill.on('stage', renderStage);
-  pdf2skill.on('log', (e) => appendLog(e.level, e.message));
+  pdf2skill.on('log', (e) => appendLog(e.level, e.message, e.kind ?? 'run'));
   pdf2skill.on('error', (e) => appendLog('error', `[${e.error.code}] ${e.error.message}`));
 
   window.addEventListener('beforeunload', (e) => {

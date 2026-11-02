@@ -111,6 +111,12 @@ export interface RunResult {
   referenceCount: number;
 }
 
+/** A ready-to-install skill zip (SKILL.md + references at the archive root). */
+export interface SkillZipResult {
+  blob: Blob;
+  skillName: string;
+}
+
 // ── Jobs / storage ──────────────────────────────────────────────────
 
 export interface JobMeta {
@@ -150,9 +156,13 @@ export interface StageEvent {
   resumed?: boolean;
 }
 
+export type LogKind = 'stage' | 'run' | 'detail';
+
 export interface LogEvent {
   level: 'info' | 'warn' | 'error';
   message: string;
+  /** UI hint: stage divider, normal run message, or verbose detail. */
+  kind?: LogKind;
 }
 
 export type Pdf2SkillEvents = {
