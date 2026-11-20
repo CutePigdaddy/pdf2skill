@@ -1,7 +1,7 @@
 import type { Pdf2SkillConfig } from '../types';
 import { Pdf2SkillError } from '../errors';
 import { mineruError } from './errors';
-import { extractMineruZip } from './zipExtract';
+import { extractMineruZip, parseJsonErrorBody } from './zipExtract';
 import { splitPdfIfNeeded } from '../pdf/splitter';
 import { ensureDir, writeBytes, copyDirFiles, getDir } from '../storage/opfs';
 
@@ -217,7 +217,14 @@ export class RemoteMinerUClient {
       }
       throw new Pdf2SkillError('MINERU_DOWNLOAD', `下载 MinerU 结果失败 (HTTP ${resp.status})`, '请重试', 'mineru');
     }
-    return new Uint8Array(await resp.arrayBuffer());
+    const zipBytes = new Uint8Array(await resp.arrayBuffer());
+    // The proxy sometimes reports errors with HTTP 200; catch that here so
+    // the JSON body is not handed to JSZip as if it were the result ZIP.
+    const jsonErr = await parseJsonErrorBody(zipBytes);
+    if (jsonErr) {
+      throw new Pdf2SkillError(jsonErr.code, jsonErr.message, jsonErr.advice ?? '', 'mineru');
+    }
+    return zipBytes;
   }
 
   /**

@@ -1,6 +1,6 @@
 import type { Pdf2SkillConfig } from '../types';
 import { Pdf2SkillError } from '../errors';
-import { extractMineruZip } from './zipExtract';
+import { extractMineruZip, parseJsonErrorBody } from './zipExtract';
 import { ensureDir, writeBytes, copyDirFiles, getDir } from '../storage/opfs';
 
 export interface MinerUClientOptions {
@@ -82,6 +82,12 @@ export class LocalMinerUClient {
     }
 
     const zipBytes = new Uint8Array(await resp.arrayBuffer());
+    // The proxy reports local-MinerU errors with HTTP 200 + JSON body; parse
+    // it out before the bytes are mistaken for the result ZIP.
+    const jsonErr = await parseJsonErrorBody(zipBytes);
+    if (jsonErr) {
+      throw new Pdf2SkillError(jsonErr.code, jsonErr.message, jsonErr.advice ?? '', 'mineru');
+    }
     const stem = filename.replace(/\.pdf$/i, '');
     await writeBytes(jobRoot, `${stem}_mineru_output.zip`, zipBytes);
 

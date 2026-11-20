@@ -1,5 +1,26 @@
 import JSZip from 'jszip';
 import { Pdf2SkillError } from '../errors';
+
+/** Parse a JSON error envelope that arrived with HTTP 200 (proxy bug or
+ * misrouted response) before the bytes are mistaken for a ZIP. */
+export async function parseJsonErrorBody(bytes: Uint8Array): Promise<
+  { code: string; message: string; advice?: string } | null
+> {
+  const head = new TextDecoder().decode(bytes.slice(0, 512)).trim();
+  if (!head.startsWith('{')) return null;
+  try {
+    const parsed = JSON.parse(head.endsWith('}') ? head : new TextDecoder().decode(bytes)) as {
+      ok?: boolean;
+      error?: { code: string; message: string; advice?: string };
+      detail?: { ok?: boolean; error?: { code: string; message: string; advice?: string } };
+    };
+    const envelope = (parsed.detail ?? parsed) as typeof parsed;
+    if (envelope.ok === false && envelope.error) return envelope.error;
+  } catch {
+    // Not JSON (or truncated) — fall through and treat as binary.
+  }
+  return null;
+}
 import { ensureDir, writeBytes } from '../storage/opfs';
 
 export interface ExtractResult {
@@ -22,7 +43,18 @@ export async function extractMineruZip(
   zipBytes: Uint8Array,
   extractDir: FileSystemDirectoryHandle,
 ): Promise<ExtractResult> {
-  const zip = await JSZip.loadAsync(zipBytes);
+  let zip: JSZip;
+  try {
+    zip = await JSZip.loadAsync(zipBytes);
+  } catch (e) {
+    throw new Pdf2SkillError(
+      'MINERU_RESULT_INVALID',
+      'MinerU 返回的内容不是有效的 ZIP 文件',
+      '通常是下载环节失败，请查看服务端日志中的真实错误后重试',
+      'mineru',
+      e,
+    );
+  }
 
   const mdPaths: string[] = [];
   for (const path of Object.keys(zip.files)) {
